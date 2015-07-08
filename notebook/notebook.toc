@@ -1,0 +1,5 @@
+\contentsline {chapter}{\nonumberline 2015.07.01}{5}
+\contentsline {chapter}{\nonumberline 2015.07.05, to make up for a couple of hours Thurs morning}{7}
+\contentsline {chapter}{\nonumberline 2015.07.06}{9}
+\contentsline {chapter}{\nonumberline 2015.07.07}{11}
+\contentsline {chapter}{\nonumberline 2015.07.08}{13}
