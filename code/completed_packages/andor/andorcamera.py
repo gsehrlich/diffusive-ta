@@ -24,6 +24,7 @@ class AndorCamera(QtCore.QObject):
     func_call = QtCore.pyqtSignal(str, tuple, dict)
     new_images = QtCore.pyqtSignal(int)
     done_acquiring = QtCore.pyqtSignal()
+    abort_acquisition = QtCore.pyqtSignal()
 
     # temp must be an int
     default_temp = {
@@ -131,6 +132,7 @@ class AndorCamera(QtCore.QObject):
         cam_lib.CoolerON()
 
         self.func_call.connect(self._call)
+        self.abort_acquisition.connect(self.abort)
 
     def __del__(self):
         """Shut down gracefully"""
@@ -439,17 +441,15 @@ class AndorCamera(QtCore.QObject):
     def scan_until_abort(self, alloc, read_mode="fullbin", dark=False, **kwargs):
         """Take images continuously until aborted, writing continuously"""
         # Set defaults for kwargs passed to prep_aquisition
-        kwargs.setdefault("accum_cycle_time", 0)
-        kwargs.setdefault("n_accums", 1)
+        #kwargs.setdefault("accum_cycle_time", 0)
+        #kwargs.setdefault("n_accums", 1)
         kwargs.setdefault("kin_cycle_time", 0)
-        kwargs.setdefault("n_kinetics", 1)
-        n_accums = kwargs["n_accums"]
-        n_kinetics = kwargs["n_kinetics"]
+        #n_accums = kwargs["n_accums"]
 
         # Set up acquisition in kinetic mode.
         # Get actual kinetic cycle time and number of cycles -->
         # determine how often to check for new data
-        _, _, kin_time = self.prep_acquisition(acq_mode=3,
+        _, _, kin_time = self.prep_acquisition(acq_mode=5,
             read_mode=read_mode, **kwargs)
 
         # Memorize read mode so that memory can be emptied later
@@ -462,8 +462,9 @@ class AndorCamera(QtCore.QObject):
         # another signal, for stop acquisition, and hook it up to timer.stop
         # and the acquisition updater
         def _tmp():
-            self.get_data(read_mode, alloc=alloc)
-            self.new_images.emit(1)
+            n = self.get_data(read_mode, alloc=alloc)
+            if n > 0:
+                self.new_images.emit(n)
         self.scan_until_abort_slot = _tmp
         self.scan_until_abort_timer = QtCore.QTimer()
         self.scan_until_abort_timer.setInterval(int(kin_time)*100) # ms!
@@ -476,12 +477,15 @@ class AndorCamera(QtCore.QObject):
 
     def abort(self):
         """Abort a scan_until_abort acquisition"""
+        print self.scan_until_abort_timer.thread()
+        print self.thread()
+
         # stop copying data from camera
         self.scan_until_abort_timer.stop()
 
         # stop camera from getting new data
         self.make_current()
-        cam_lib.AbortAquisition()
+        cam_lib.AbortAcquisition()
 
         # clean out data register
         self.get_data(self.scan_until_abort_read_mode)

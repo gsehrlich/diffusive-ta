@@ -1,7 +1,9 @@
 from PyQt4 import QtGui, QtCore, uic
-from andor.andorcamera import idus
+from andor.andorcamera import newton
 import numpy as np
 import sys
+
+idus = newton
 
 ui_filename = "specgraphtest.ui" # filename here
 
@@ -26,6 +28,7 @@ class SpecGraphWidget(QtGui.QWidget, Ui_Widget):
 
         self.curve = self.plotter.plot()
         self.plot_generator.plot.connect(self._plot)
+        self.ready_to_plot = True
 
     @QtCore.pyqtSlot()
     def start_acquiring(self):
@@ -38,11 +41,14 @@ class SpecGraphWidget(QtGui.QWidget, Ui_Widget):
 
     @QtCore.pyqtSlot(np.ndarray, np.ndarray)
     def _plot(self, x, y):
-        global app
-        y = np.random.randn(512)
-        self.curve.setData(x, y)
-        #app.processEvents()
-        print "plotted"
+        # check if the plotter is locked; if so, skip this curve
+        if self.ready_to_plot:
+            global app
+            self.ready_to_plot = False
+            self.curve.setData(x, y)
+            app.processEvents()
+            self.ready_to_plot = True
+        else: return
 
     @QtCore.pyqtSlot(np.ndarray, int, int)
     def img(self, img, mx, mn):
@@ -101,7 +107,7 @@ class ContinuousImager(QtCore.QObject):
     plot = QtCore.pyqtSignal(np.ndarray, np.ndarray)
     done = QtCore.pyqtSignal()
 
-    def __init__(self, n_avg=10):
+    def __init__(self, n_avg=1000):
         super(ContinuousImager, self).__init__()
 
         self.start.connect(self.acquire)
@@ -117,11 +123,11 @@ class ContinuousImager(QtCore.QObject):
         idus.done_acquiring.connect(self.done)
         self.alloc = np.zeros((1, idus.x), dtype=np.int32)
         self.averager = np.zeros((self.n_avg, idus.x), dtype=np.int32)
+        self.tot = np.zeros((idus.x,), dtype=float)
+        self.current_ptr = 0
         self.args = (self.alloc,)
         self.kwargs = {
-            "n_accums": 1,
-            "accum_cycle_time": 0,
-            "kin_cycle_time": .1,
+            "kin_cycle_time": 0,
             "wavelen": 543
         }
 
@@ -132,16 +138,19 @@ class ContinuousImager(QtCore.QObject):
         idus.func_call.emit("scan_until_abort", self.args, self.kwargs)
 
     @QtCore.pyqtSlot(int)
-    def generate(self, n):
-        for i in xrange(self.n_avg - 1):
-            self.averager[i] = self.averager[i + 1]
-        self.averager[-1] = self.alloc[0]
-        disp = sum(self.averager, 0)
-        self.plot.emit(self.x, self.alloc[0])
-        print "emitted"
+    def generate(self, n_new):
+        self.tot -= self.averager[self.current_ptr]
+        self.averager[self.current_ptr] = self.alloc[0]
+        self.tot += self.averager[self.current_ptr]
+        self.current_ptr += 1
+        self.current_ptr %= self.n_avg
+        disp = self.tot/self.n_avg
+        self.plot.emit(self.x, disp)
 
     def __del__(self):
         """Quit thread before deletion"""
+        print self.thread()
+        idus.abort_acquisition.emit()
         self.cam_thread.terminate()
 
 if __name__ == "__main__":
