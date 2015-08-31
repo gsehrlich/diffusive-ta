@@ -1,0 +1,153 @@
+notes:
+======
+
+iDus:
+-----
+
+GetHardwareVersion (in[10]):
+    Plug-in card version: 0
+    Flex 10K file version: 0
+    dummy1: 0
+    dummy2: 3
+    CameraFirmwareVersion: 8
+    CameraFirmwareBuild: 0
+
+GetNumberVSSpeeds (in[11]):
+    not supported
+
+GetSoftwareVersion (in[15]):
+    EPROM version: 0
+    COF file version: 0
+    Driver revision number: 0
+    Driver version number: 0
+    DLL revision number: 99
+    DLL version number: 2
+
+GetNumberHSSpeeds (in[16]):
+    returned undocumented error code: DRV_P3_INVALID (20068)
+    EDIT: was forgetting to pass two of the three parameters. Will come back to
+    this later if it becomes important.
+
+GetTemperatureRange (in[18]):
+    -120 through 20 deg C
+
+GetTemperature (in[23]):
+    goes from returning DRV_TEMPERATURE_NOT_REACHED (20037) to returning
+    DRV_TEMPERATURE_NOT_STABILIZED (20035) when temp with 2 deg of target
+    is reached.
+    then goes to DRV_TEMPERATURE_STABILIZED (20036) a bit after reaching 2 deg
+    below target temperature for some reason.
+
+SetShutter (in[28]):
+    heard no click when I used typ=0; heard a click when I switched to typ=1;
+    heard another click when I switched back to typ=0. Assuming it's already
+    in whatever mode it's supposed to be right now, we want typ=0.
+
+GetAcquisitionTimings (in[33] and later in[58] and in[63]):
+    after setting shutter opening and closing times to 1 s  (EDITED FROM 50 MS)
+    (although I haven't checked that it worked; it did return 20002 though), I
+    get that
+    exposure = 1.000000floatstuff
+    accumulate = 1.005162floatstuff
+    kinetic = accumulate
+
+    later changed exposure time to 0.01 sec and got
+    exposure = 0.0099999999floatstuff
+    accumulate = 0.015623999floatstuff
+    kinetic = accumulate
+
+    at 0.0001 sec, got
+    exposure = 9.999999floatstuffe-05
+    accumulate = 0.0052624000floatstuff
+    kinetic = accumulate
+
+GetStatus (in[35]):
+    when I forgot to pass the int by reference, it gave me DRV_P1INVALID (20066)
+    but then I fixed it and it worked. I checked the previous weird return
+    value and I did actually pass by reference that time, so that's a separate
+    issue.
+    DRV_STATUS_IDLE(20073): ready to take picture (presumably)
+
+StartAcquisition(in[36]):
+    took a few seconds to return, but then returned success (20002)
+
+GetStatus, again (in[39]):
+    this time, instead of returning me a weird error code, ctypes threw a Python
+    error, which was weird:
+        WindowsError: exception: access violation writing [memory address]
+    #NOITDIDNT getting status also took kind of a while
+    waiting for time.sleep(2) to finish took a little while, not GetStatus
+
+GetAcquiredData (in[54]):
+    looks like it can get the data multiple times; it's not erased. Checked by
+    zeroing out array (in[53]) and trying again.
+
+observing data from 1 sec and 0.01 sec data collections:
+    looks like they're the same. That's weird because I checked
+    GetAcquisitionTimings in between and confirmed that the exposure times
+    were what they were supposed to be, and then I did exactly the same thing
+    in both (just ran the same notebook cells over again) and the same for
+    0.0001 sec too, but it almost looks like one of them didn't stick...
+    will rerun now and see if I can reproduce it.
+
+Newton:
+-------
+
+GetHardwareVersion:
+    Plug-in card version: 0
+    Flex 10K file version: 0
+    dummy1: 0
+    dummy2: 131
+    CameraFirmwareVersion: 20
+    CameraFirmwareBuild: 24
+
+GetNumberVSSpeeds:
+    11
+
+GetVSSpeed:
+    1.7
+    3.3
+    6.5
+    12.9
+    25.7
+    51.3
+    76.9
+    102.5
+    128.1
+    153.7
+    179.3
+
+GetSoftwareVersion:
+    EPROM version: 0
+    COF file version: 0
+    Driver revision number: 0
+    Driver version number: 0
+    DLL revision number: 99
+    DLL version number: 2
+
+GetTemperatureRange:
+    -120 through 20 deg C
+
+GetAcquisitionTimings:
+    after setting shutter opening and closing times to 1 s (although I
+    haven't checked that it worked; it did return 20002 though), I get that
+    exposure = 1.0
+    accumulate = 1.0
+    kinetic = 1.0
+
+    later changed exposure time to 0.01 sec and got
+    exposure = 0.0099999999floatstuff
+    accumulate = same as exposure
+    kinetic = accumulate
+
+    at 0.0001 sec, got
+    exposure = 0.003719999floatstuffe-05
+    accumulate = same as exposure
+    kinetic = accumulate
+
+GetAcquiredData
+    in acquisition mode 1, the returned array has shape (1024, 256), but for the
+    second parameter the function needs just the first dimension, 1024L.
+    Also the data looks awfully sparse. probably because the flipper mirror is
+    oriented towards the iDus right now. I can't find a way in SDK to control
+    the flipper mirror...
