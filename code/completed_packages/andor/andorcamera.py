@@ -30,6 +30,11 @@ class AndorCamera(QtCore.QObject):
         "newton": -70,
         "idus": -70
         }
+    acq_modes = {
+        "single": 1,
+        "accum:": 2,
+        "kinetic": 3
+        }
     trigger_modes = {
         "internal": 0,
         "external": 1,
@@ -293,22 +298,53 @@ class AndorCamera(QtCore.QObject):
             
             return self.get_data(read_mode)
     
-    def get_data(self, read_mode, alloc=None):
-        """Return data gathered by the camera
+    def get_data(self, read_mode, alloc=None, n_start=0):
+        """Get data gathered by the camera
 
-        Provide `alloc` to overwrite that array instead of making a new one
+        Provide `alloc` to overwrite that array instead of making a new one. If
+        there are more new images than spots for images in the array, store as
+        many as possible.
+
+        Parameters:
+            read_mode: the read mode used by the camera to store these images
+            alloc: a provided NumPy ndarray with the appropriate dimensions.
+                Defaults to None, in which case a new array of the correct
+                dimensions will be created.
+            img_size: the dimensions of the 
+            n_start: the index of alloc into which to copy the first copied
+                image. Defaults to 0.
+
+        Return value:
+            if alloc:
+                n = number of new images
+            else:
+                new NumPy ndarray containing data
         """
         self.make_current()
-        
-        # Find out which images to gather, and how many total
-        first, last = cam_lib.GetNumberNewImages(long, long)
-        n_images = 1 + last - first
 
-        # Make a new array, if necessary
+        # Find out which images to gather, and how many total
+        try:
+            first, last = cam_lib.GetNumberNewImages(int, int)
+        except IOError as e:
+            if not "NO_NEW" in e.message:
+                raise e
+            else:
+                return 0 # zero new images
+
+        # Check how many images are available
+        n_avail = 1 + last - first
+
+        # If none provided, make an array that can get all the images
+        # Otherwise, see how many images will fit in the given array. Get a
+        # slice from the array and update the index of the last image to
+        # copy accordingly.
         if alloc is None:
-            data = self.get_new_array(n_images, read_mode)
+            data = self.get_new_array(n_avail, read_mode)
+            n_copied = n_avail
         else:
-            data = alloc
+            n_copied = min(len(alloc) - n_start, n_avail)
+            data = alloc[n_start : n_start+n_copied]
+            last = first + n_copied - 1
 
         # Get number of elements in array, since function needs to know
         size = long(product(data.shape))
@@ -326,9 +362,15 @@ class AndorCamera(QtCore.QObject):
                   "\tactual_last%d" % (first, actual_first, last, actual_last)
             raise IOError(msg)
         
-        # If the array was not user-supplied, return it (else do nothing more)
+        # If the array was not user-supplied, return it.
+        # Otherwise, return the number of images transferred to the array
         if alloc is None:
             return data
+        # Otherwise, send the signal that new images are available, and
+        # return the number of images transferred to the array
+        else: 
+            self.new_images.emit(n_copied)
+            return n_copied
     
     def single_scan(self, read_mode="fullbin", dark=False, **kwargs):
         """Take a single exposure, wait for it to finish, then return the data
@@ -359,30 +401,6 @@ class AndorCamera(QtCore.QObject):
         tot_time = cycle_time*n_accums
         return self.expose(read_mode, get_data_dt=tot_time, dark=dark)
 
-    def _copy_imgs(self, alloc, img_size, n_start=0):
-        """Copy new images from cam into specified memory; return number new"""
-        try:
-            first, last = cam_lib.GetNumberNewImages(int, int)
-        except IOError as e:
-            if not "NO_NEW" in e.message:
-                raise e
-            else:
-                return 0 # number of new images = 0
-        else:
-            n_new = 1 + last - first
-            n_copied = min(len(alloc) - n_start, n_new)
-            actual_last = last - (n_new - n_copied)
-
-            # Get as much new data as will fit
-            cam_lib.GetImages(first, actual_last,
-                alloc[n_start : min(len(alloc), n_start+n_copied)].ctypes,
-                n_copied*img_size, long, long)
-
-            # Alert whatever called this function that new images are available
-            self.new_images.emit(n_new)
-
-            return n_new
-
     def kinetic(self, alloc, read_mode="fullbin", dark=False, **kwargs):
         """Take a kinetic series and write the data continuously to alloc"""
         # Set defaults for kwargs passed to prep_aquisition
@@ -399,8 +417,8 @@ class AndorCamera(QtCore.QObject):
         _, _, kin_time = self.prep_acquisition(acq_mode=3,
             read_mode=read_mode, **kwargs)
 
-        # Check that alloc has the correct dimensions and dtype & get img size
-        img_size = self.check_array(alloc, n_kinetics, read_mode)
+        # Check that alloc has the correct dimensions and dtype
+        self.check_array(alloc, n_kinetics, read_mode)
 
         # Start the exposure, but don't wait to get data
         self.expose()
@@ -409,7 +427,7 @@ class AndorCamera(QtCore.QObject):
         # is copied.
         n_saved = 0
         while n_saved < n_kinetics:
-            n_new = self._copy_imgs(alloc, img_size, n_start=n_saved)
+            n_new = self.get_data(read_mode, alloc=alloc, n_start=n_saved)
 
             # Update counters and wait for the next loop
             n_saved += n_new
@@ -444,7 +462,7 @@ class AndorCamera(QtCore.QObject):
         # another signal, for stop acquisition, and hook it up to timer.stop
         # and the acquisition updater
         def _tmp():
-            self._copy_imgs(alloc, img_size)
+            self.get_data(read_mode, alloc=alloc)
             self.new_images.emit(1)
         self.scan_until_abort_slot = _tmp
         self.scan_until_abort_timer = QtCore.QTimer()
