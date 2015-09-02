@@ -25,6 +25,8 @@ class AndorCamera(QtCore.QObject):
     new_images = QtCore.pyqtSignal(int)
     done_acquiring = QtCore.pyqtSignal()
     abort_acquisition = QtCore.pyqtSignal()
+    aborted = QtCore.pyqtSignal()
+    already_idle = QtCore.pyqtSignal()
 
     # temp must be an int
     default_temp = {
@@ -34,7 +36,8 @@ class AndorCamera(QtCore.QObject):
     acq_modes = {
         "single": 1,
         "accum:": 2,
-        "kinetic": 3
+        "kinetic": 3,
+        "scan_until_abort": 5
         }
     trigger_modes = {
         "internal": 0,
@@ -135,10 +138,7 @@ class AndorCamera(QtCore.QObject):
         self.abort_acquisition.connect(self.abort)
 
     def __del__(self):
-        """Shut down gracefully"""
-        self.make_current()
-        cam_lib.CoolerOFF()
-        cam_lib.ShutDown()
+        self.shut_down()
         
     def get_temp(self, out=False):
         """Return the camera's current temp (not goal temp)"""
@@ -440,18 +440,16 @@ class AndorCamera(QtCore.QObject):
 
     def scan_until_abort(self, alloc, read_mode="fullbin", dark=False, **kwargs):
         """Take images continuously until aborted, writing continuously"""
-        # Set defaults for kwargs passed to prep_aquisition
-        #kwargs.setdefault("accum_cycle_time", 0)
-        #kwargs.setdefault("n_accums", 1)
+        # Set default for kwargs passed to prep_aquisition
         kwargs.setdefault("kin_cycle_time", 0)
-        #n_accums = kwargs["n_accums"]
+
+        print "kin_cycle_time: %r" % kwargs["kin_cycle_time"]
 
         # Set up acquisition in kinetic mode.
         # Get actual kinetic cycle time and number of cycles -->
         # determine how often to check for new data
         _, _, kin_time = self.prep_acquisition(acq_mode=5,
             read_mode=read_mode, **kwargs)
-
         # Memorize read mode so that memory can be emptied later
         self.scan_until_abort_read_mode = read_mode
 
@@ -464,10 +462,13 @@ class AndorCamera(QtCore.QObject):
         def _tmp():
             n = self.get_data(read_mode, alloc=alloc)
             if n > 0:
+                print "new data!"
                 self.new_images.emit(n)
         self.scan_until_abort_slot = _tmp
         self.scan_until_abort_timer = QtCore.QTimer()
-        self.scan_until_abort_timer.setInterval(int(kin_time)*100) # ms!
+        # check ten times as frequently as we expect images (ms), but at least
+        # 10 Hz
+        self.scan_until_abort_timer.setInterval(min(int(kin_time*100), 100))
         self.scan_until_abort_timer.timeout.connect(self.scan_until_abort_slot)
 
         # Start the acquisition and return
@@ -475,23 +476,40 @@ class AndorCamera(QtCore.QObject):
         self.scan_until_abort_timer.start()
         return
 
+    @QtCore.pyqtSlot()
     def abort(self):
-        """Abort a scan_until_abort acquisition"""
-        print self.scan_until_abort_timer.thread()
-        print self.thread()
+        """Abort a scan_until_abort acquisition, unless it's already aborted"""
+        try:
+            self.assert_idle()
+        except AssertionError:
+            print "why is this not called?"
+            # stop copying data from camera
+            self.scan_until_abort_timer.stop()
+            #self.scan_until_abort_timer.timeout.disconnect(self.scan_until_abort_slot)
+            #self.scan_until_abort_timer.timeout.connect(self.scan_until_abort_timer.stop)
+            print QtCore.QThread.currentThread()
+            print self.scan_until_abort_timer.thread()
 
-        # stop copying data from camera
-        self.scan_until_abort_timer.stop()
+            # stop camera from getting new data
+            self.make_current()
+            cam_lib.AbortAcquisition()
 
-        # stop camera from getting new data
+            # clean out data register
+            self.get_data(self.scan_until_abort_read_mode)
+
+            # destroy the timer and slot so no new data copying is attempted
+            #del self.scan_until_abort_timer, self.scan_until_abort_slot
+
+            self.aborted.emit()
+        else:
+            self.already_idle.emit()
+
+    def shut_down(self):
+        """Shut down gracefully"""
         self.make_current()
-        cam_lib.AbortAcquisition()
+        cam_lib.CoolerOFF()
+        cam_lib.ShutDown()
 
-        # clean out data register
-        self.get_data(self.scan_until_abort_read_mode)
-
-        # destroy the timer and slot so no new data copying is attempted
-        del self.scan_until_abort_timer, self.scan_until_abort_slot
 
 # Doesn't work yet
 """

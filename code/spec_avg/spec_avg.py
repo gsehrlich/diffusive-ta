@@ -17,9 +17,10 @@ class SpecGraphWidget(QtGui.QWidget, Ui_Widget):
         self.setupUi(self)
 
         self.go_button.clicked.connect(self.start_acquiring)
+        self.abort_button.clicked.connect(self.abort_acquisition)
+        self.abort_button.setEnabled(False)
 
         self.plot_generator = plot_generator
-        self.plot_generator.done.connect(self.release_button)
 
         """
         self.plot_generator.plot_image.connect(self.img)
@@ -34,9 +35,12 @@ class SpecGraphWidget(QtGui.QWidget, Ui_Widget):
     def start_acquiring(self):
         self.go_button.setEnabled(False)
         self.plot_generator.start.emit()
+        self.abort_button.setEnabled(True)
 
     @QtCore.pyqtSlot()
-    def release_button(self):
+    def abort_acquisition(self):
+        self.abort_button.setEnabled(False)
+        self.plot_generator.abort.emit()
         self.go_button.setEnabled(True)
 
     @QtCore.pyqtSlot(np.ndarray, np.ndarray)
@@ -55,6 +59,11 @@ class SpecGraphWidget(QtGui.QWidget, Ui_Widget):
         global app
         self.imager.setImage(img, levels=(mx, mn), autoHistogramRange=False)
         app.processEvents()
+
+    def closeEvent(self, event):
+        self.plot_generator.quit_gracefully()
+        event.accept()
+
 
 """
 class Imager(QtCore.QObject):
@@ -105,12 +114,13 @@ class Imager(QtCore.QObject):
 class ContinuousImager(QtCore.QObject):
     start = QtCore.pyqtSignal()
     plot = QtCore.pyqtSignal(np.ndarray, np.ndarray)
-    done = QtCore.pyqtSignal()
+    abort = QtCore.pyqtSignal()
 
     def __init__(self, n_avg=1000):
         super(ContinuousImager, self).__init__()
 
         self.start.connect(self.acquire)
+        self.abort.connect(self.abort_acq)
 
         self.cam_thread = QtCore.QThread()
         self.cam_thread.start()
@@ -120,14 +130,13 @@ class ContinuousImager(QtCore.QObject):
 
         idus.moveToThread(self.cam_thread)
         idus.new_images.connect(self.generate)
-        idus.done_acquiring.connect(self.done)
         self.alloc = np.zeros((1, idus.x), dtype=np.int32)
         self.averager = np.zeros((self.n_avg, idus.x), dtype=np.int32)
         self.tot = np.zeros((idus.x,), dtype=float)
         self.current_ptr = 0
         self.args = (self.alloc,)
         self.kwargs = {
-            "kin_cycle_time": 0,
+            "kin_cycle_time": 0.5,
             "wavelen": 543
         }
 
@@ -147,11 +156,20 @@ class ContinuousImager(QtCore.QObject):
         disp = self.tot/self.n_avg
         self.plot.emit(self.x, disp)
 
-    def __del__(self):
-        """Quit thread before deletion"""
-        print self.thread()
+    def abort_acq(self):
+        # wait for acquisition to finish aborting
+        # TODO: timeout and throw error
+        loop = QtCore.QEventLoop()
+        idus.aborted.connect(loop.quit)
+        idus.already_idle.connect(loop.quit)
         idus.abort_acquisition.emit()
-        self.cam_thread.terminate()
+        loop.exec_()
+
+    def quit_gracefully(self):
+        """Quit thread before deletion"""
+        self.abort_acq()
+        self.cam_thread.exit()
+        idus.shut_down()
 
 if __name__ == "__main__":
     app = QtGui.QApplication(sys.argv)
