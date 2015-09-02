@@ -127,7 +127,7 @@ from ctypes import *
 import re
 import os
 import platform
-from _andorpath import _andor_exec
+from ._andorpath import _andor_exec
 
 class AndorDLL(object):
     # Constructors for pointers that are used to get return values

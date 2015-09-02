@@ -11,8 +11,8 @@ Python.
 
 import time
 import numpy as np
-from andordll import cam_lib
-import andorspectro
+from .andordll import cam_lib
+from .andorspectro import spec
 from ctypes import c_int, byref
 from PyQt4 import QtCore
 
@@ -89,6 +89,10 @@ class AndorCamera(QtCore.QObject):
         # Tell the camera and spectrometer they've been attached
         self.spec = spec
         self.spec.attached_cameras.add(self)
+
+        # Initialize and register the spectrometer
+        self.spec.initialize()
+        self.spec.register()
         
         # Store the way to handle used to access this camera, then make sure
         # the rest of the calls to cam_lib refer to this camera
@@ -462,7 +466,6 @@ class AndorCamera(QtCore.QObject):
         def _tmp():
             n = self.get_data(read_mode, alloc=alloc)
             if n > 0:
-                print "new data!"
                 self.new_images.emit(n)
         self.scan_until_abort_slot = _tmp
         self.scan_until_abort_timer = QtCore.QTimer()
@@ -482,13 +485,9 @@ class AndorCamera(QtCore.QObject):
         try:
             self.assert_idle()
         except AssertionError:
-            print "why is this not called?"
+            # camera is NOT idle
             # stop copying data from camera
             self.scan_until_abort_timer.stop()
-            #self.scan_until_abort_timer.timeout.disconnect(self.scan_until_abort_slot)
-            #self.scan_until_abort_timer.timeout.connect(self.scan_until_abort_timer.stop)
-            print QtCore.QThread.currentThread()
-            print self.scan_until_abort_timer.thread()
 
             # stop camera from getting new data
             self.make_current()
@@ -498,7 +497,7 @@ class AndorCamera(QtCore.QObject):
             self.get_data(self.scan_until_abort_read_mode)
 
             # destroy the timer and slot so no new data copying is attempted
-            #del self.scan_until_abort_timer, self.scan_until_abort_slot
+            del self.scan_until_abort_timer, self.scan_until_abort_slot
 
             self.aborted.emit()
         else:
@@ -510,25 +509,6 @@ class AndorCamera(QtCore.QObject):
         cam_lib.CoolerOFF()
         cam_lib.ShutDown()
 
-
-# Doesn't work yet
-"""
-    def cont_single_scans(self, **kwargs):
-        self.make_current()
-        
-        read_mode = kwargs.pop("read_mode", "image")
-        kwargs.setdefault("kin_cycle_time", 0)
-        actual_times = self.prep_acquisition(acq_mode=1, read_mode=read_mode, **kwargs)
-        
-        #w = pg.image()
-        data = self.get_new_array(n_images=1, read_mode=read_mode)
-        while w.isVisible():
-            cam_lib.StartAcquisition()
-            time.sleep(1)
-            self.get_data(read_mode=read_mode, data=data)
-            w.setImage(data)
-"""
-
 name_dict = {
     17910: "newton",
     17911: "idus"
@@ -536,6 +516,6 @@ name_dict = {
 
 cams = {}
 for i in xrange(cam_lib.GetAvailableCameras(int)):
-    cam = AndorCamera(cam_lib.GetCameraHandle(i, int), andorspectro.spec)
+    cam = AndorCamera(cam_lib.GetCameraHandle(i, int), spec)
     cams[cam.name] = cam
 locals().update(cams)

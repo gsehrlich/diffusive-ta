@@ -3,46 +3,45 @@
 Spectrometers currently implemented: Andor Shamrock.
 """
 
-from andordll import spec_lib
-from _andorpath import _get_andor_path
+from .andordll import spec_lib
+from ._andorpath import _get_andor_path
+from ._known import spectrometers
 
 class AndorShamrock(object):
-    # Keep track of where and if this module is initialized
-    _initialized_in = None
+    """Integrates functionality for interacting with Andor Shamrock"""
 
-    def __init__(self, ind):
-        """Integrates functionality for interacting with Andor Shamrock"""
-        self.ind = ind
-
-        if AndorShamrock._initialized_in is None:
-            AndorShamrock.ShamrockInitialize()
-
-        self.serial = self.ShamrockGetSerialNumber(str)
-        self.name = name_dict[self.serial]
-
+    def __init__(self, serial):
+        self.serial = serial
         self.attached_cameras = set()
+        self.initialized = False
+        self.registered = False
 
-    def __del__(self):
-        """Shut down gracefully"""
-        self.ShamrockClose()
+    def initialize(self):
+        """Initialize the Shamrock device wrapped by this object"""
 
-    @classmethod
-    def ShamrockInitialize(cla, IniPath=None):
-        """Wrapper to update class variable _initialized_in with `IniPath`"""
-        # Set default initialization location
-        if IniPath is None:
-            IniPath = _get_andor_path()
+        try:
+            # Check if Shamrock library is initialized
+            n = spec_lib.ShamrockGetNumberDevices(int)
+        except IOError as e:
+            if "NOT_INITIALIZED" in e.message:
+                # If not, initialize it and try again
+                spec_lib.ShamrockInitialize()
+                n = spec_lib.ShamrockGetNumberDevices(int)
+                self.initialized = True
+            else:
+                # This shouldn't happen; that function throws only one error
+                raise
 
-        spec_lib.ShamrockInitialize(IniPath)
+    def register(self):
+        # Find the index of the (first) spectro whose serial number matches
+        for ind in xrange(spec_lib.ShamrockGetNumberDevices(int)):
+            if spec_lib.ShamrockGetSerialNumber(ind, str) == self.serial:
+                self.ind = ind
+                break
+        else:
+            raise KeyError("Serial number %r not found" % self.serial)
 
-        # Update the class variable
-        cla._initialized_in = IniPath
-
-    @classmethod
-    def ShamrockClose(cla):
-        """Wrapper to update class variable _initialized_in with `None`"""
-        spec_lib.ShamrockClose()
-        cla._initialized_in = None
+        self.name = spectrometers[self.serial]
 
     def __getattr__(self, name):
         """Get the improved function from the wrapped library
@@ -56,38 +55,53 @@ class AndorShamrock(object):
         func = getattr(spec_lib, name)
 
         # Check if it's one of the not-defined-as-amethod functions that
-        # accepts `device` as first argument; if so, wrap the function and make
-        # it an instance attribute before giving it to the user
+        # accepts `device` as first argument; if so, wrap it so that the first
+        # index is already included and so that it handles errors intelligently
         if name not in ("ShamrockGetFunctionReturnDescription",
             "ShamrockGetNumberDevices"):
-            new_func = self.wrap(func, name)
-            self.__dict__[name] = new_func
-            return new_func
-        # Otherwise, leave it as is and make it a class attribute before giving
-        # it to the user
+            new_func = self.wrap(func, name, include_ind=True)
+        # Otherwise, don't bother with the first index, but still make it
+        # handle errors intelligently
         else:
-            AndorShamrock.__dict__[name] = func
-            return func
+            new_func = self.wrap(func, name, include_ind=False)
 
-    def wrap(self, func, name):
-        def new_func(*args):
-            # Plug in the index as the first arg and pass the rest
-            return func(self.ind, *args)
-        new_func.func_name = name
-        new_func.func_doc = "Wrapped function %r from %r" % (name, spec_lib)
+        # Then make it an instance attribute before giving it to the user
+        self.__dict__[name] = new_func
         return new_func
 
-# Given serial number, what variable name to use?
-name_dict = {"SR2078": "spec"}
+    def wrap(self, func, name, include_ind):
+        if include_ind:
+            def new_func(*args):
+                # Plug in the index as the first arg and pass the rest to the
+                # error handler
+                return self.handle_errors(func, (self.ind,) + args)
+        else:
+            # Just pass to the error handler
+            new_func = lambda *args: handle_errors(func, args)
 
-# Initialize all the spectrographs
-AndorShamrock.ShamrockInitialize()
+        new_func.func_name = name
+        new_func.func_doc = "Wrapped function %r from %r" % (name, self)
+        return new_func
 
-# Wrap all known attached spectrographs
-specs = {}
-for i in xrange(spec_lib.ShamrockGetNumberDevices(int)):
-    try:
-        spec = AndorShamrock(i)
-    except KeyError: pass
-    specs[spec.name] = spec
-locals().update(specs)
+    @staticmethod
+    def handle_errors(func, args):
+            """Deal with errors if self is not intialized or not registered"""
+            try:
+                return func(*args)
+            except IOError as e:
+                # Iff self is not initialized, the spectrometer will say so
+                if "NOT_INITIALIZED" in e:
+                    raise IOError("Must initialize first: %r" % self)
+                else:
+                    raise
+            except AttributeError as e:
+                # Iff this object is not registered, it won't know its ind
+                if "'ind'" in e.message:
+                    raise IOError("Must register first: %r" % self)
+                else:
+                    raise
+
+# Wrap all known attached spectrographs and add to this scope for importing
+locals().update(
+    {spectrometers[serial]: AndorShamrock(serial) for serial in spectrometers}
+    )
