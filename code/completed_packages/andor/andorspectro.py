@@ -6,6 +6,7 @@ Spectrometers currently implemented: Andor Shamrock.
 from .andordll import spec_lib
 from ._andorpath import _get_andor_path
 from ._known import spectrometers
+import types
 
 class AndorShamrock(object):
     """Integrates functionality for interacting with Andor Shamrock"""
@@ -33,6 +34,7 @@ class AndorShamrock(object):
                 raise
 
     def register(self):
+        """Find the index of the spectrometer with this serial number"""
         # Find the index of the (first) spectro whose serial number matches
         for ind in xrange(spec_lib.ShamrockGetNumberDevices(int)):
             if spec_lib.ShamrockGetSerialNumber(ind, str) == self.serial:
@@ -65,23 +67,24 @@ class AndorShamrock(object):
         else:
             new_func = self.wrap(func, name, include_ind=False)
 
-        # Then make it an instance attribute before giving it to the user
-        self.__dict__[name] = new_func
         return new_func
 
     def wrap(self, func, name, include_ind):
+        """Return a bound method that calls `func` intelligently"""
         if include_ind:
-            def new_func(*args):
-                # Plug in the index as the first arg and pass the rest to the
-                # error handler
-                return self.handle_errors(func, (self.ind,) + args)
+            # Plug in the index as the first arg and pass the rest to the
+            # error handler
+            new_func = lambda *args: self.handle_errors(func, (self.ind,)+args)
         else:
             # Just pass to the error handler
-            new_func = lambda *args: handle_errors(func, args)
+            new_func = lambda *args: self.handle_errors(func, args)
 
+        # Write metadata for clarity
         new_func.func_name = name
         new_func.func_doc = "Wrapped function %r from %r" % (name, self)
-        return new_func
+
+        # Bind it to this object and provide its class
+        return types.MethodType(new_func, self, self.__class__)
 
     @staticmethod
     def handle_errors(func, args):
