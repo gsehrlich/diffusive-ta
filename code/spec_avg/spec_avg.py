@@ -3,7 +3,7 @@ from andor.andorcamera import newton
 import numpy as np
 import sys
 
-idus = newton
+cam = newton
 
 ui_filename = "specgraphtest.ui" # filename here
 
@@ -11,6 +11,8 @@ ui_filename = "specgraphtest.ui" # filename here
 Ui_Widget, QtBaseClass = uic.loadUiType(ui_filename)
 
 class SpecGraphWidget(QtGui.QWidget, Ui_Widget):
+    processEvents = QtCore.pyqtSignal()
+
     def __init__(self, plot_generator):
         QtGui.QWidget.__init__(self)
         Ui_Widget.__init__(self)
@@ -50,7 +52,7 @@ class SpecGraphWidget(QtGui.QWidget, Ui_Widget):
             global app
             self.ready_to_plot = False
             self.curve.setData(x, y)
-            app.processEvents()
+            self.processEvents.emit()
             self.ready_to_plot = True
         else: return
 
@@ -79,10 +81,10 @@ class Imager(QtCore.QObject):
         self.cam_thread = QtCore.QThread()
         self.cam_thread.start()
 
-        idus.moveToThread(self.cam_thread)
-        idus.new_images.connect(self.generate)
-        idus.done_acquiring.connect(self.done)
-        self.alloc = np.zeros((n_kinetics, idus.x), dtype=np.int32)
+        cam.moveToThread(self.cam_thread)
+        cam.new_images.connect(self.generate)
+        cam.done_acquiring.connect(self.done)
+        self.alloc = np.zeros((n_kinetics, cam.x), dtype=np.int32)
         self.kinetic_args = (self.alloc,)
         self.kinetic_kwargs = {
             "n_accums": 1,
@@ -97,7 +99,7 @@ class Imager(QtCore.QObject):
     def acquire(self):
         self.alloc[:] = 0
         self.images_gathered = 0
-        idus.func_call.emit("kinetic", self.kinetic_args, self.kinetic_kwargs)
+        cam.func_call.emit("kinetic", self.kinetic_args, self.kinetic_kwargs)
 
     @QtCore.pyqtSlot(int)
     def generate(self, n):
@@ -126,17 +128,17 @@ class ContinuousImager(QtCore.QObject):
         self.cam_thread.start()
 
         self.n_avg = n_avg
-        self.x = np.arange(idus.x)
+        self.x = np.arange(cam.x)
 
-        idus.moveToThread(self.cam_thread)
-        idus.new_images.connect(self.generate)
-        self.alloc = np.zeros((1, idus.x), dtype=np.int32)
-        self.averager = np.zeros((self.n_avg, idus.x), dtype=np.int32)
-        self.tot = np.zeros((idus.x,), dtype=float)
+        cam.moveToThread(self.cam_thread)
+        cam.new_images.connect(self.generate)
+        self.alloc = np.zeros((1, cam.x), dtype=np.int32)
+        self.averager = np.zeros((self.n_avg, cam.x), dtype=np.int32)
+        self.tot = np.zeros((cam.x,), dtype=float)
         self.current_ptr = 0
         self.args = (self.alloc,)
         self.kwargs = {
-            "kin_cycle_time": 0.5,
+            "kin_cycle_time": 0,
             "wavelen": 543
         }
 
@@ -144,7 +146,7 @@ class ContinuousImager(QtCore.QObject):
     def acquire(self):
         self.alloc[:] = 0
         self.averager[:] = 0
-        idus.func_call.emit("scan_until_abort", self.args, self.kwargs)
+        cam.func_call.emit("scan_until_abort", self.args, self.kwargs)
 
     @QtCore.pyqtSlot(int)
     def generate(self, n_new):
@@ -160,20 +162,23 @@ class ContinuousImager(QtCore.QObject):
         # wait for acquisition to finish aborting
         # TODO: timeout and throw error
         loop = QtCore.QEventLoop()
-        idus.aborted.connect(loop.quit)
-        idus.already_idle.connect(loop.quit)
-        idus.abort_acquisition.emit()
+        cam.aborted.connect(loop.quit)
+        cam.already_idle.connect(loop.quit)
+        cam.abort_acquisition.emit()
         loop.exec_()
 
     def quit_gracefully(self):
         """Quit thread before deletion"""
         self.abort_acq()
         self.cam_thread.exit()
-        idus.shut_down()
+        cam.shut_down()
 
-if __name__ == "__main__":
+def main():
     app = QtGui.QApplication(sys.argv)
     window = SpecGraphWidget(ContinuousImager())
+    window.processEvents.connect(app.processEvents)
     window.show()
-    print "starting"
-    sys.exit(app.exec_())
+    return app.exec_()
+
+if __name__ == "__main__":
+    sys.exit(main())

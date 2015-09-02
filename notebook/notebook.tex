@@ -439,4 +439,33 @@ I can now plot spectra from the camera in real-time, though currently only as an
 
 I committed stuff to git for the first time in a while. I've been using GitHub instead of Dropbox so it hasn't really been necessary, but I'm definitely not installing my own Dropbox on the lab computer, so... it's time.
 
+\labday{2015.09.01}
+
+I've been working on getting the scan-until-abort mode working, and I'm running into unexpected difficulties as a result of Qt's signals and slots being confusing. What I've learned so far:
+\begin{itemize}
+\item QTimers are created into their own new QThread instances, and the first call to the QThread constructor after that (if it's immediate? not sure) will return a pointer to \emph{the same thread}.
+\item To go along with the above, the pointer representation that Python displays is not a helpful tool for telling which thread something has moved to. I have little idea if there's a better tool. It's possible to set object names for threads, including the main thread, but I don't know how consistent/convenient that actually is.
+\item As further proof that the pointer representation is unreliable, sometimes when a new thread is spawned PyQt will point that thread at the current location of the main thread and then move the main thread to a different location.
+\item By default, connections between signals and slots/signals have the type \verb PyQt4.QtCore.Qt.AutoConnection . This means that when the signal is sent from a different thread from what it's connected to, it will be queued (asynchronous), and when the signal is sent from the same thread from what it's connected to, it will be direct (synchronous). This means I have a bunch of extra signals inside my threads, so I'll just get rid of them now. I guess I'm going to spend a while cleaning up my code now that I kinda understand this.
+\item The program \verb spec_avg.py  is still raising errors, along the lines of \verb"QTimer.stop can't be called from another thread". I think there's something special happening when the window close button is pressed, and I need to do more inspection to figure that out. It's hard to judge how important this is; I really do want to abort the acquisition before quitting the program, but it doesn't seem to want to do that properly (i.e. I can't stop the timer error-free).
+\end{itemize}
+
+Okay I figured out the timer error, I think: the call to abort the acquisition was being queued but not yet executed, and before it could execute that thread was exited (and the camera object was moved back to the main thread or something?); this meant the queued function executed from the wrong thread. Or something. Anyway I used a little wait-for-a-signal hack from \url{http://jdreaver.com/posts/2014-07-03-waiting-for-signals-pyside-pyqt.html}---the ``Solution'', not the ``General Solution'', which I should really fix---so that now the application won't exit until the acquisition has been aborted.
+
+Now I'm pretty sure I'm running into camera errors---it's not getting the kinetic cycle time right. I'm going to leave that for tomorrow.
+
+\labday{2015.09.02}
+
+Everything is working smoothly. First of all I was taking an \verb int()  too early, which is why the kinetic cycle time was wrong; second of all it seems as if waiting for the camera to cool down solves the problem where the graph was flatlining (only giving a flat line of zeros).
+
+Now in order to avoid cooling and heating the camera all the time, I'm refining the code so that the spectrometer and cameras can be imported without changing initializing them: once I'm done, initialization (and registering, figuring out which index/handle corresponds to that camera's serial number) must be called after importing. I might also pickle the \verb AndorDLL  objects so that multiple instances can be open at once, referring to the same library, but it seems easier to just rely on the \verb DRV_NOT_AVAILABLE  error that \verb  Initialize throws when there's already another instance initialized.
+
+I also made a little change to how AndorSpectrometer stores the functions it has converted: if they require an index at the beginning, I made them instance methods, and if they don't, I made them staticmethods of AndorShamrock. This is just sensible, and in addition it covers certain edge cases in which the instance's index changes or something. I might make a similar change to AndorCamera so that explicitly calling \verb self.make_current()  is unnecessary, but it's working well enough as is that I might as well not.
+
+Final thought: I still need to remember to make two aspects of the boxcar averaging work correctly:
+\begin{enumerate}
+\item When the averaging just starts, ignore the zero lines so that the signal is at the correct place and just gets more averaged.
+\item When the averaging stops, reset everything to zero so that it doesn't add on to existing data next time.
+\end{enumerate}
+
 \end{document} 
