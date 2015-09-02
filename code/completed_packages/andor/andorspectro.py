@@ -61,33 +61,47 @@ class AndorShamrock(object):
         # index is already included and so that it handles errors intelligently
         if name not in ("ShamrockGetFunctionReturnDescription",
             "ShamrockGetNumberDevices"):
-            new_func = self.wrap(func, name, include_ind=True)
-        # Otherwise, don't bother with the first index, but still make it
-        # handle errors intelligently
+            new_func = self._wrap(func, name)
+        # Otherwise, don't bother with the first index and make it a static
+        # method, but still make it handle errors intelligently
         else:
-            new_func = self.wrap(func, name, include_ind=False)
+            new_func = self._wrap(func, name, static=True)
 
         return new_func
 
-    def wrap(self, func, name, include_ind):
+    def _wrap(self, func, name, static=False):
         """Return a bound method that calls `func` intelligently"""
-        if include_ind:
+        if static:
+            # Pass to the error handler without changes
+            new_func = lambda *args: self._handle_errors(func, args)
+
+            # Write metadata for clarity
+            self._write_metadata(new_func, name)
+
+            # Return a static method built from that function
+            new_func = staticmethod(new_func)
+            setattr(AndorShamrock, name, new_func)
+            return new_func
+        else:
             # Plug in the index as the first arg and pass the rest to the
             # error handler
-            new_func = lambda *args: self.handle_errors(func, (self.ind,)+args)
-        else:
-            # Just pass to the error handler
-            new_func = lambda *args: self.handle_errors(func, args)
+            new_func = (
+                lambda self, *args: self._handle_errors(func, (self.ind,)+args)
+                )
 
-        # Write metadata for clarity
-        new_func.func_name = name
-        new_func.func_doc = "Wrapped function %r from %r" % (name, self)
+            # Write metadata for clarity
+            self._write_metadata(new_func, name)
 
-        # Bind it to this object and provide its class
-        return types.MethodType(new_func, self, self.__class__)
+            # Bind it to this instance as a method
+            return types.MethodType(new_func, self, self.__class__)
+
+    def _write_metadata(self, func, name):
+        """Give func a new name and docstring"""
+        func.func_name = name
+        func.func_doc = "Wrapped function %r from %r" % (name, self)
 
     @staticmethod
-    def handle_errors(func, args):
+    def _handle_errors(func, args):
             """Deal with errors if self is not intialized or not registered"""
             try:
                 return func(*args)
