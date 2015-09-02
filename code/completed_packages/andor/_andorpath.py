@@ -12,7 +12,7 @@ def _get_andor_path():
     with open(os.path.join(_self_path, 'config.txt')) as f:
         s = f.read()
     # Parse the file contents and return just the path
-    return re.match(r"andorpath: (.*?)$", s, flags=re.MULTILINE).groups()[0]
+    return re.match(r"andorpath: (.+)$", s, flags=re.MULTILINE).groups()[0]
 
 def _andor_exec(func, args=None, kwargs=None, subdir=''):
     """Execute a function from within the Andor SDK installation directory"""
