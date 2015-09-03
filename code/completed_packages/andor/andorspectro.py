@@ -14,21 +14,17 @@ class AndorShamrock(object):
     def __init__(self, serial):
         self.serial = serial
         self.attached_cameras = set()
-        self.initialized = False
-        self.registered = False
 
     def initialize(self):
-        """Initialize the Shamrock device wrapped by this object"""
+        """Initialize the Shamrock DLL wrapped by this object"""
 
         try:
-            # Check if Shamrock library is initialized
-            n = spec_lib.ShamrockGetNumberDevices(int)
+            # Check if Shamrock library is already initialized
+            spec_lib.ShamrockGetNumberDevices(int)
         except IOError as e:
             if "NOT_INITIALIZED" in e.message:
                 # If not, initialize it and try again
                 spec_lib.ShamrockInitialize()
-                n = spec_lib.ShamrockGetNumberDevices(int)
-                self.initialized = True
             else:
                 # This shouldn't happen; that function throws only one error
                 raise
