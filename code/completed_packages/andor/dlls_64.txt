@@ -1,0 +1,2 @@
+spec_lib:	Shamrock64	ShamrockCIF.dll	ShamrockCIF.h
+cam_lib:	.	atmcd64d.dll	ATMCD32D.H

@@ -128,6 +128,7 @@ import re
 import os
 import platform
 from ._andorpath import _andor_exec
+from ._known import dlls_32, dlls_64
 
 class AndorDLL(object):
     # Constructors for pointers that are used to get return values
@@ -259,14 +260,13 @@ class AndorDLL(object):
             self.lib)
         return _new_func
 
-# Predefine DLLs used in Christoph's lab.
+# Predefine DLLs based on given filenames
 # Which DLL to use depends on architecture:
 bitness = platform.architecture()[0]
-spec_lib_subdir = "Shamrock64" if bitness == "64bit" else "Shamrock"
-cam_lib_filename = "atmcd64d.dll" if bitness == "64bit" else "atmcd32d.dll"
+dlls = dlls_64 if bitness == "64bit" else dlls_32
 
-# Change to package directory to load DLLs because they themselves load DLLs
-# recursively from the same directory
-spec_lib = _andor_exec(AndorDLL, args=("ShamrockCIF.dll", "ShamrockCIF.h"),
-    subdir=spec_lib_subdir)
-cam_lib = _andor_exec(AndorDLL, args=(cam_lib_filename, "ATMCD32D.H"))
+# Add the DLLs to this scope for importing
+for varname, (subdir, dll, header) in dlls.items():
+    locals().update(
+        {varname: _andor_exec(AndorDLL, args=(dll, header), subdir=subdir)}
+        )
