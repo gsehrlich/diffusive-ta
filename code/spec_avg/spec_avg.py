@@ -4,6 +4,9 @@ import numpy as np
 import sys
 
 cam = newton
+cam.initialize()
+cam.register()
+cam.cooldown()
 
 ui_filename = "specgraphtest.ui" # filename here
 

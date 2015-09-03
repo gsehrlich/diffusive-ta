@@ -80,9 +80,10 @@ class AndorShamrock(object):
             return new_func
         else:
             # Plug in the index as the first arg and pass the rest to the
-            # error handler
+            # error handler. This will be a method, so make the first arg
+            # the instance. Use `slf` to avoid referencing self.
             new_func = (
-                lambda self, *args: self._handle_errors(func, (self.ind,)+args)
+                lambda slf, *args: slf._handle_errors(func, (slf.ind,)+args)
                 )
 
             # Write metadata for clarity

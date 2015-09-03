@@ -1,7 +1,7 @@
 """Integrates functionality for interacting with Andor Cameras
 
-WARNING: not suitable for rapid simultaneous interfacing with two or more
-cameras. May not raise errors; may just yield garbage data.
+WARNING: not thread-safe with two simultaneous cameras. May not raise errors;
+may just yield garbage data.
 
 Defines a class, `AndorCamera`, and two instances of it, `newton` and `idus`,
 which bundle functionality from the andordll module for easy use from within
@@ -13,14 +13,21 @@ import time
 import numpy as np
 from .andordll import cam_lib
 from .andorspectro import spec
+from ._known import cameras, cam_info
 from ctypes import c_int, byref
 from PyQt4 import QtCore
+from contextlib import contextmanager
 
 def product(l):
     """Return the product of the elements in the iterable"""
     return reduce(lambda x, y: x*y, l)
 
+class CameraHandle(object):
+    def __init__(self, keep_open):
+        self.keep_open = keep_open
+
 class AndorCamera(QtCore.QObject):
+    "Control Andor cameras attached to a USB-controlled Andor Shamrock"
     func_call = QtCore.pyqtSignal(str, tuple, dict)
     new_images = QtCore.pyqtSignal(int)
     done_acquiring = QtCore.pyqtSignal()
@@ -48,11 +55,67 @@ class AndorCamera(QtCore.QObject):
         "fullbin": 0,
         "image": 4
         }
-    trigger_type = 0 # TIL low open shutter
-    flipper_ports = {
-        "newton": 0,
-        "idus": 1,
-        }
+
+    @staticmethod
+    def _is_initialized(handle):
+        "Return True if the handle is already initialized, else False"
+        # Set handle as current
+        print "Setting camera with handle %r as current:" % handle,
+        cam_lib.SetCurrentCamera(handle)
+
+        try:
+            # Check if this camera is initialized yet
+            cam_lib.GetCameraSerialNumber(str)
+        except IOError as e:
+            if "NOT_INITIALIZED" in e.message:
+                # Camera not currently initialized
+                return False
+            else:
+                # This shouldn't happen; that function only throws one error
+                raise
+        else:
+            # If no error was raised, camera is already inited. Raise error
+            return True
+
+    @classmethod
+    def get_handle_dict(cls, keep_serials_open=()):
+        """Return a dict of serial numbers: handles.
+
+        Warning: all cameras that were not already initialized will be
+        initialized and then shut down."""
+        # If this has already been done, just return the dict
+        if hasattr(cls, "handle_dict"):
+            return cls.handle_dict
+
+        # Initialize the empty dict and begin looping through all the cameras
+        print "Finding camera handles of all serial numbers..."
+        handle_dict = {}
+        for i in xrange(cam_lib.GetAvailableCameras(int)):
+            # Get the handle
+            handle = cam_lib.GetCameraHandle(i, int)
+
+            # Set handle to current and find out whether it's initialized yet
+            was_preinitialized = cls._is_initialized(handle)
+
+            # If not, initialize it
+            if not was_preinitialized:
+                print "Initializing:",
+                cam_lib.Initialize()
+
+            # Find and store the serial number
+            serial = cam_lib.GetCameraSerialNumber(int)
+            handle_dict[serial] = handle
+            print "Found handle %r for serial %r" % (handle, serial)
+
+            # If the camera wasn't already inited, and the function wasn't
+            # instructed to keep it open, close it.
+            if not was_preinitialized and serial not in keep_serials_open:
+                print "Shutting down serial %r" % serial
+                cam_lib.ShutDown()
+
+        # Store this in the class and then return it
+        cls.handle_dict = handle_dict
+        return handle_dict
 
     # Makes it possible to call arbitrary methods through signals
     @QtCore.pyqtSlot(str, tuple, dict)
@@ -64,49 +127,61 @@ class AndorCamera(QtCore.QObject):
         if cam_lib.GetCurrentCamera(int) != self.handle:
             if out: print "Making %s current:" % self.name,
             cam_lib.SetCurrentCamera(self.handle)
-    
-    # defines `self.temp` as a property with the default getter
-    @property
-    def temp(self):
-        return self._temp
-    
-    # Now that `self.temp` is a property, create a non-default setter
-    @temp.setter
-    def temp(self, temp):
-        """Change temp to update the camera's goal temperature"""
-        if temp is None:
-            self._temp = self.default_temp[self.name]
-        else:
-            self._temp = int(temp)
-        print "Setting %s temperature:" % self.name,
-        cam_lib.SetTemperature(self._temp)
             
-    def __init__(self, handle, spec, temp=None):
-        """Class for easy use of Andor cameras"""
+    def __init__(self, serial, spec):
+        """Set up attributes for AndorCamera instance"""
         # Initialize this as a QtCore.QObject so that it can have bound signals
         super(AndorCamera, self).__init__()
+
+        # Connect signals to their slots
+        self.func_call.connect(self._call)
+        self.abort_acquisition.connect(self.abort)
+
+        # Store the serial number of the desired camera, and get the name
+        self.serial = serial
+        self.name = cameras[self.serial]
 
         # Tell the camera and spectrometer they've been attached
         self.spec = spec
         self.spec.attached_cameras.add(self)
 
-        # Initialize and register the spectrometer
-        self.spec.initialize()
-        self.spec.register()
-        
-        # Store the way to handle used to access this camera, then make sure
-        # the rest of the calls to cam_lib refer to this camera
-        self.handle = handle
-        self.make_current(out=False) # no name yet; would throw AttributeError
-        
-        print "Initializing..."
-        cam_lib.Initialize()
-        
-        # Use the camera serial number to figure out which one it is
-        self.serial_no = cam_lib.GetCameraSerialNumber(int)
-        self.name = name_dict[self.serial_no]
-        print "Initialized %s." % self.name
-        
+    def initialize(self, cooldown=True, temp=None):
+        """Initialize the Andor DLL wrapped by this object"""
+        # Try handle corresponding to index given in cam_info
+        ind = cam_info[self.name]["index"]
+        handle = cam_lib.GetCameraHandle(ind, int)
+
+        # Set handle as current and find out whether it's initialized yet
+        was_preinitialized = self._is_initialized(handle)
+        if not was_preinitialized:
+            # If not, initialize it
+            print "Initializing:",
+            cam_lib.Initialize()
+
+        # Check if the serial number is right
+        serial = cam_lib.GetCameraSerialNumber(int)
+        if self.serial == serial:
+            # If it's right, set the handle
+            self.handle = handle
+        else:
+            # Otherwise, look up all the handles' serial numbers to find
+            # the correct one, and store it. This will keep the right one open.
+            # Also keep the wrong one open until after this loop.
+            print "Wrong serial number %r. Should be %r." % (serial, self.serial),
+            handle_dict = self.get_handle_dict(keep_serials_open=(self.serial,))
+            self.handle = handle_dict[self.serial]
+
+            # Then shut down the one that's wrong.
+            if not was_preinitialized:
+                print "Setting wrong camera with handle %r as current:" % handle,
+                cam_lib.SetCurrentCamera(handle)
+                print "Shutting down wrong camera:",
+                cam_lib.ShutDown()
+
+    def register(self):
+        """Fetch information about this camera from DLL"""
+        self.make_current()
+
         # Set up detector size information
         x, y = cam_lib.GetDetector(int, int)
         self.x = long(x)
@@ -116,30 +191,16 @@ class AndorCamera(QtCore.QObject):
             "fullbin": (self.x,)
             }
 
-        self.hardware_version = cam_lib.GetHardwareVersion(*(int,)*6)
-        try:
-            self.n_VS_speeds = cam_lib.GetNumberVSSpeeds(int)
-        except IOError as e:
-            self.n_VS_speeds = 0
-            print "GetNumberVSSpeeds: %s" % e.message
-        if self.n_VS_speeds > 0:
-            self.VS_speeds = tuple(cam_lib.GetVSSpeed(i, int)
-                                    for i in xrange(self.n_VS_speeds))
-        
-        # TODO, maybe: figure out first two params that work
-        #self.n_HS_speeds = cam_lib.GetNumberHSSpeeds(1, 0, int)
-        #self.HS_speeds = tuple((cam_lib.GetHSSpeed(i, 1, 0, float)
-        #                        for i in xrange(self.n_HS_speeds)))
-        
-        self.mintemp, self.maxtemp = cam_lib.GetTemperatureRange(int, int)
+    def cooldown(self, temp=None):
+        """Start the camera cooldown"""
+        self.make_current()
+        # Set temperature, if provided and if cooldown
+        if temp is not None:
+            cam_lib.SetTemperature(int(temp))
 
-        # Set the goal temp and start cooling down
-        self.temp = temp
-        print "Turning %s cooler on:" % self.name,
+        # Start the cooldown
+        # If no temperatue provided, will use whatever default the lib/cam has
         cam_lib.CoolerON()
-
-        self.func_call.connect(self._call)
-        self.abort_acquisition.connect(self.abort)
 
     def __del__(self):
         self.shut_down()
@@ -171,6 +232,7 @@ class AndorCamera(QtCore.QObject):
                 
     def assert_idle(self):
         """Make sure the camera is idle; if not, raise AssertionError"""
+        self.make_current()
         assert cam_lib.GetStatus(int) == cam_lib.consts["DRV_IDLE"]
 
     def patient_assert_idle(self, dt=1, out=False):
@@ -206,7 +268,7 @@ class AndorCamera(QtCore.QObject):
         print "Setting flipper mirror:"
         self.spec.ShamrockSetFlipperMirror(
             2,                              # it's an OUTPUT flipper
-            self.flipper_ports[self.name])   # which port this camera is in
+            cam_info[self.name]["port"])    # which port this camera is in
 
         # Set required parameters
         print "Setting acquisition mode:",
@@ -232,13 +294,13 @@ class AndorCamera(QtCore.QObject):
         print "Setting trigger mode:",
         cam_lib.SetTriggerMode(self.trigger_modes[trigger])
         if fast_external:
-            cam_lib.SetFastExtTrigger(fast_external)
+            cam_lib.SetFastExtTrigger(1)
 
         # The camera isn't connected to the shutter, so tell it not to try
         # to do anything different
         print "Making camera ignore shutter:",
         cam_lib.SetShutter(
-            self.trigger_type,  # Whether output TTL low open or TTL high open
+            0,                  # Output TTL low open
             2,                  # Permanently closed: send no signals
             0., 0.              # Leave no extra opening/closing time
             )
@@ -479,7 +541,6 @@ class AndorCamera(QtCore.QObject):
         self.scan_until_abort_timer.start()
         return
 
-    @QtCore.pyqtSlot()
     def abort(self):
         """Abort a scan_until_abort acquisition, unless it's already aborted"""
         try:
@@ -509,13 +570,7 @@ class AndorCamera(QtCore.QObject):
         cam_lib.CoolerOFF()
         cam_lib.ShutDown()
 
-name_dict = {
-    17910: "newton",
-    17911: "idus"
-    }
-
-cams = {}
-for i in xrange(cam_lib.GetAvailableCameras(int)):
-    cam = AndorCamera(cam_lib.GetCameraHandle(i, int), spec)
-    cams[cam.name] = cam
-locals().update(cams)
+# Add known cameras to scope for importing
+locals().update(
+    {cameras[serial]: AndorCamera(serial, spec) for serial in cameras}
+    )
