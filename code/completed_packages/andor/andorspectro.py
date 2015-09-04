@@ -24,6 +24,7 @@ class AndorShamrock(object):
         except IOError as e:
             if "NOT_INITIALIZED" in e.message:
                 # If not, initialize it and try again
+                print "Initializing...",
                 spec_lib.ShamrockInitialize()
             else:
                 # This shouldn't happen; that function throws only one error

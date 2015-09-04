@@ -3,10 +3,7 @@ from andor.andorcamera import newton
 import numpy as np
 import sys
 
-cam = newton
-cam.initialize()
-cam.register()
-cam.cooldown()
+cam=newton
 
 ui_filename = "specgraphtest.ui" # filename here
 
@@ -45,7 +42,7 @@ class SpecGraphWidget(QtGui.QWidget, Ui_Widget):
     @QtCore.pyqtSlot()
     def abort_acquisition(self):
         self.abort_button.setEnabled(False)
-        self.plot_generator.abort.emit()
+        self.plot_generator.abort_acq()
         self.go_button.setEnabled(True)
 
     @QtCore.pyqtSlot(np.ndarray, np.ndarray)
@@ -121,23 +118,25 @@ class ContinuousImager(QtCore.QObject):
     plot = QtCore.pyqtSignal(np.ndarray, np.ndarray)
     abort = QtCore.pyqtSignal()
 
-    def __init__(self, n_avg=1000):
+    def __init__(self, cam, n_avg=1000):
         super(ContinuousImager, self).__init__()
 
         self.start.connect(self.acquire)
-        self.abort.connect(self.abort_acq)
 
+        self.cam = cam
         self.cam_thread = QtCore.QThread()
-        self.cam_thread.start()
 
         self.n_avg = n_avg
-        self.x = np.arange(cam.x)
+        self.x = np.arange(self.cam.x)
 
-        cam.moveToThread(self.cam_thread)
-        cam.new_images.connect(self.generate)
-        self.alloc = np.zeros((1, cam.x), dtype=np.int32)
-        self.averager = np.zeros((self.n_avg, cam.x), dtype=np.int32)
-        self.tot = np.zeros((cam.x,), dtype=float)
+        self.cam.moveToThread(self.cam_thread)
+        self.cam.new_images.connect(self.generate)
+        self.abort.connect(self.cam.abort, type=QtCore.Qt.BlockingQueuedConnection)
+        self.cam_thread.start()
+
+        self.alloc = np.zeros((1, self.cam.x), dtype=np.int32)
+        self.averager = np.zeros((self.n_avg, self.cam.x), dtype=np.int32)
+        self.tot = np.zeros((self.cam.x,), dtype=float)
         self.current_ptr = 0
         self.args = (self.alloc,)
         self.kwargs = {
@@ -149,7 +148,7 @@ class ContinuousImager(QtCore.QObject):
     def acquire(self):
         self.alloc[:] = 0
         self.averager[:] = 0
-        cam.func_call.emit("scan_until_abort", self.args, self.kwargs)
+        self.cam.func_call.emit("scan_until_abort", self.args, self.kwargs)
 
     @QtCore.pyqtSlot(int)
     def generate(self, n_new):
@@ -164,21 +163,24 @@ class ContinuousImager(QtCore.QObject):
     def abort_acq(self):
         # wait for acquisition to finish aborting
         # TODO: timeout and throw error
-        loop = QtCore.QEventLoop()
-        cam.aborted.connect(loop.quit)
-        cam.already_idle.connect(loop.quit)
-        cam.abort_acquisition.emit()
-        loop.exec_()
+        print "aborting..."
+        self.abort.emit()
+        print "aborted"
 
     def quit_gracefully(self):
         """Quit thread before deletion"""
         self.abort_acq()
         self.cam_thread.exit()
-        cam.shut_down()
+        self.cam.shut_down()
 
-def main():
+def main(cam=cam):
+    cam.spec.initialize()
+    cam.spec.register()
+    cam.initialize()
+    cam.register()
+    cam.cooldown()
     app = QtGui.QApplication(sys.argv)
-    window = SpecGraphWidget(ContinuousImager())
+    window = SpecGraphWidget(ContinuousImager(cam))
     window.processEvents.connect(app.processEvents)
     window.show()
     return app.exec_()
