@@ -82,7 +82,7 @@ class AndorCamera(QtCore.QObject):
         """Return a dict of serial numbers: handles.
 
         Warning: all cameras that were not already initialized will be
-        initialized and then shut down."""
+        initialized and then shut down (unless told to keep them open)."""
         # If this has already been done, just return the dict
         if hasattr(cls, "handle_dict"):
             return cls.handle_dict
@@ -123,7 +123,10 @@ class AndorCamera(QtCore.QObject):
         getattr(self, str(name))(*args, **kwargs)
     
     def make_current(self, out=True):
-        """Make sure cam_lib knows this is the current camera"""
+        """Make sure cam_lib knows this is the current camera
+
+        If handle is not defined yet, self.__getattr__ will raise a good error.
+        """
         if cam_lib.GetCurrentCamera(int) != self.handle:
             if out: print "Making %s current:" % self.name,
             cam_lib.SetCurrentCamera(self.handle)
@@ -167,13 +170,15 @@ class AndorCamera(QtCore.QObject):
             # Otherwise, look up all the handles' serial numbers to find
             # the correct one, and store it. This will keep the right one open.
             # Also keep the wrong one open until after this loop.
-            print "Wrong serial number %r. Should be %r." % (serial, self.serial),
+            print ("Wrong serial number %r. Should be %r." % 
+                (serial, self.serial)),
             handle_dict = self.get_handle_dict(keep_serials_open=(self.serial,))
             self.handle = handle_dict[self.serial]
 
             # Then shut down the one that's wrong.
             if not was_preinitialized:
-                print "Setting wrong camera with handle %r as current:" % handle,
+                print ("Setting wrong camera with handle %r as current:" % 
+                        handle),
                 cam_lib.SetCurrentCamera(handle)
                 print "Shutting down wrong camera:",
                 cam_lib.ShutDown()
@@ -191,15 +196,37 @@ class AndorCamera(QtCore.QObject):
             "fullbin": (self.x,)
             }
 
+    def __getattr__(self, name):
+        """Throw comprehensible error if camera is not yet registered.
+
+        This function will only be called if the attribute is not found through
+        the usual means (e.g. the object __dict__ and all class and superclass
+        __dict__s)."""
+        # Create standard message
+        message = "%r object has no attribute %r" % (type(self), name)
+        # If it's one of the attribute names defined in initialize or register,
+        # add additional explanation.
+        if name == "handle":
+            message += ". Must call .initialize() first"
+        elif name in ("x", "y", "img_dims"):
+            message += ". Must call .register() first"
+
+        raise AttributeError(message)
+
     def cooldown(self, temp=None):
         """Start the camera cooldown"""
         self.make_current()
-        # Set temperature, if provided and if cooldown
-        if temp is not None:
-            cam_lib.SetTemperature(int(temp))
+        # Fetch the target temperature and then set it
+        if temp is None:
+            temp = int(cam_info[self.name]["temp"])
+        else:
+            temp = int(temp)
+        print "Setting temp to %d:" % temp,
+        cam_lib.SetTemperature(temp)
 
         # Start the cooldown
         # If no temperatue provided, will use whatever default the lib/cam has
+        print "Turning cooler on:",
         cam_lib.CoolerON()
 
     def __del__(self):
@@ -389,6 +416,11 @@ class AndorCamera(QtCore.QObject):
                 new NumPy ndarray containing data
         """
         self.make_current()
+
+        # Check if camera is stabilized; if not, send warning
+        temp, ret = self.get_temp()
+        if ret != cam_lib.consts["DRV_TEMPERATURE_STABILIZED"]:
+            print "Warning: %r; temp %d" % (cam_lib.errs[ret], temp)
 
         # Find out which images to gather, and how many total
         try:

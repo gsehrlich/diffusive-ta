@@ -131,13 +131,13 @@ class ContinuousImager(QtCore.QObject):
 
         self.cam.moveToThread(self.cam_thread)
         self.cam.new_images.connect(self.generate)
-        self.abort.connect(self.cam.abort, type=QtCore.Qt.BlockingQueuedConnection)
+        self.abort.connect(self.cam.abort,
+            type=QtCore.Qt.BlockingQueuedConnection)
         self.cam_thread.start()
 
         self.alloc = np.zeros((1, self.cam.x), dtype=np.int32)
         self.averager = np.zeros((self.n_avg, self.cam.x), dtype=np.int32)
         self.tot = np.zeros((self.cam.x,), dtype=float)
-        self.current_ptr = 0
         self.args = (self.alloc,)
         self.kwargs = {
             "kin_cycle_time": 0,
@@ -146,18 +146,28 @@ class ContinuousImager(QtCore.QObject):
 
     @QtCore.pyqtSlot()
     def acquire(self):
-        self.alloc[:] = 0
+        self.tot[:] = 0
         self.averager[:] = 0
+        self.current_ptr = 0
+        self.start_countup = 0 # progressively increase n_avg until given limit
         self.cam.func_call.emit("scan_until_abort", self.args, self.kwargs)
 
     @QtCore.pyqtSlot(int)
     def generate(self, n_new):
-        self.tot -= self.averager[self.current_ptr]
-        self.averager[self.current_ptr] = self.alloc[0]
-        self.tot += self.averager[self.current_ptr]
-        self.current_ptr += 1
-        self.current_ptr %= self.n_avg
-        disp = self.tot/self.n_avg
+        if self.start_countup < self.n_avg:
+            self.averager[self.current_ptr] = self.alloc[0]
+            self.tot += self.averager[self.current_ptr]
+            self.current_ptr += 1
+            self.current_ptr %= self.n_avg # Only matters the last time
+            self.start_countup += 1
+            disp = self.tot / self.start_countup
+        else:
+            self.tot -= self.averager[self.current_ptr]
+            self.averager[self.current_ptr] = self.alloc[0]
+            self.tot += self.averager[self.current_ptr]
+            self.current_ptr += 1
+            self.current_ptr %= self.n_avg
+            disp = self.tot / self.n_avg
         self.plot.emit(self.x, disp)
 
     def abort_acq(self):

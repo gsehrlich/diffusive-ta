@@ -50,10 +50,16 @@ class AndorShamrock(object):
         their improved versions are added to the instance `__dict__`, so
         __getattr__ is not called again. ShamrockInitialize and ShamrockClose
         """
-        # If the attribute is not found, let spec_lib raise the AttributeError
+        # If the attribute is named 'ind', it's because this spectrometer has
+        # not yet been registered
+        if name == "ind":
+            raise IOError("Spectrometer index not found. "
+                          "Must register first: %r" % self)
+
+        # Otherwise let spec_lib raise the AttributeError
         func = getattr(spec_lib, name)
 
-        # Check if it's one of the not-defined-as-amethod functions that
+        # Check if it's one of the not-defined-as-a-method functions that
         # accepts `device` as first argument; if so, wrap it so that the first
         # index is already included and so that it handles errors intelligently
         if name not in ("ShamrockGetFunctionReturnDescription",
@@ -70,7 +76,7 @@ class AndorShamrock(object):
         """Return a bound method that calls `func` intelligently"""
         if static:
             # Pass to the error handler without changes
-            new_func = lambda *args: self._handle_errors(func, args)
+            new_func = lambda *args: self._handle_notinit(func, args)
 
             # Write metadata for clarity
             self._write_metadata(new_func, name)
@@ -84,7 +90,7 @@ class AndorShamrock(object):
             # error handler. This will be a method, so make the first arg
             # the instance. Use `slf` to avoid referencing self.
             new_func = (
-                lambda slf, *args: slf._handle_errors(func, (slf.ind,)+args)
+                lambda slf, *args: slf._handle_notinit(func, (slf.ind,)+args)
                 )
 
             # Write metadata for clarity
@@ -99,20 +105,14 @@ class AndorShamrock(object):
         func.func_doc = "Wrapped function %r from %r" % (name, self)
 
     @staticmethod
-    def _handle_errors(func, args):
-            """Deal with errors if self is not intialized or not registered"""
+    def _handle_notinit(func, args):
+            """Deal with error if self is not intialized"""
             try:
                 return func(*args)
             except IOError as e:
                 # Iff self is not initialized, the spectrometer will say so
                 if "NOT_INITIALIZED" in e:
                     raise IOError("Must initialize first: %r" % self)
-                else:
-                    raise
-            except AttributeError as e:
-                # Iff this object is not registered, it won't know its ind
-                if "'ind'" in e.message:
-                    raise IOError("Must register first: %r" % self)
                 else:
                     raise
 
