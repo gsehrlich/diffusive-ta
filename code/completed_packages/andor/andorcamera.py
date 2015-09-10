@@ -22,10 +22,6 @@ def product(l):
     """Return the product of the elements in the iterable"""
     return reduce(lambda x, y: x*y, l)
 
-class CameraHandle(object):
-    def __init__(self, keep_open):
-        self.keep_open = keep_open
-
 class AndorCamera(QtCore.QObject):
     "Control Andor cameras attached to a USB-controlled Andor Shamrock"
     func_call = QtCore.pyqtSignal(str, tuple, dict)
@@ -148,7 +144,7 @@ class AndorCamera(QtCore.QObject):
         self.spec = spec
         self.spec.attached_cameras.add(self)
 
-    def initialize(self, cooldown=True, temp=None):
+    def initialize(self):
         """Initialize the Andor DLL wrapped by this object"""
         # Try handle corresponding to index given in cam_info
         ind = cam_info[self.name]["index"]
@@ -229,18 +225,23 @@ class AndorCamera(QtCore.QObject):
         print "Turning cooler on:",
         cam_lib.CoolerON()
 
+    def get_temp_range(self):
+        """Return the (min, max) temperature of the camera"""
+        self.make_current()
+        return cam_lib.GetTemperatureRange(int, int)
+
     def __del__(self):
         self.shut_down()
         
     def get_temp(self, out=False):
-        """Return the camera's current temp (not goal temp)"""
+        """Return the camera's current temp (not goal temp) and cooler status"""
         self.make_current()
         temp = c_int()
         # don't want usual return behavior, so go to ctypes.cdll object
         ret = cam_lib.lib.GetTemperature(byref(temp))
         if out:
             print "\r\t%d, %s" % (temp.value, cam_lib.errs[ret])
-        return temp.value, ret
+        return temp.value, cam_lib.errs[ret]
         
     def wait_until_cool(self, out=False, dt=5):
         """Do nothing until the camera is stabilized at the goal temp"""
@@ -252,15 +253,19 @@ class AndorCamera(QtCore.QObject):
             print "Temp is: "
         while not stabilized:
             temp, ret = self.get_temp(out=out)
-            if ret == cam_lib.consts["DRV_TEMPERATURE_STABILIZED"]:
+            if ret == "DRV_TEMPERATURE_STABILIZED":
                 stabilized = True
             # Wait dt seconds in between checking whether it's stabilized
             if not stabilized: time.sleep(dt)
                 
+    def get_status(self):
+        """Get the camera's status"""
+        self.make_current()
+        return cam_lib.errs[cam_lib.GetStatus(int)]
+
     def assert_idle(self):
         """Make sure the camera is idle; if not, raise AssertionError"""
-        self.make_current()
-        assert cam_lib.GetStatus(int) == cam_lib.consts["DRV_IDLE"]
+        assert self.get_status() == "DRV_IDLE"
 
     def patient_assert_idle(self, dt=1, out=False):
         """Give the camera a little extra time to become idle if necessary"""
@@ -418,8 +423,8 @@ class AndorCamera(QtCore.QObject):
         self.make_current()
 
         # Check if camera is stabilized; if not, send warning
-        temp, ret = self.get_temp()
-        if ret != cam_lib.consts["DRV_TEMPERATURE_STABILIZED"]:
+        temp, status = self.get_temp()
+        if ret != "DRV_TEMPERATURE_STABILIZED":
             print "Warning: %r; temp %d" % (cam_lib.errs[ret], temp)
 
         # Find out which images to gather, and how many total
@@ -596,10 +601,13 @@ class AndorCamera(QtCore.QObject):
         else:
             self.already_idle.emit()
 
-    def shut_down(self):
-        """Shut down gracefully"""
+    def cooler_off(self):
         self.make_current()
         cam_lib.CoolerOFF()
+
+    def shut_down(self):
+        """Shut down gracefully"""
+        self.cooler_off()
         cam_lib.ShutDown()
 
 # Add known cameras to scope for importing

@@ -42,13 +42,17 @@ class AndorShamrock(object):
 
         self.name = spectrometers[self.serial]
 
+    def shut_down(self):
+        """Shut down gracefully"""
+        self.ShamrockClose()
+
     def __getattr__(self, name):
         """Get the improved function from the wrapped library
 
         This function is only called if `name` is not already in the instance
         `__dict__` or the class tree. Once foreign functions are called once,
         their improved versions are added to the instance `__dict__`, so
-        __getattr__ is not called again. ShamrockInitialize and ShamrockClose
+        __getattr__ is not called again.
         """
         # If the attribute is named 'ind', it's because this spectrometer has
         # not yet been registered
@@ -63,7 +67,7 @@ class AndorShamrock(object):
         # accepts `device` as first argument; if so, wrap it so that the first
         # index is already included and so that it handles errors intelligently
         if name not in ("ShamrockGetFunctionReturnDescription",
-            "ShamrockGetNumberDevices"):
+            "ShamrockGetNumberDevices", "ShamrockClose", "ShamrockInitialize"):
             new_func = self._wrap(func, name)
         # Otherwise, don't bother with the first index and make it a static
         # method, but still make it handle errors intelligently
@@ -115,6 +119,9 @@ class AndorShamrock(object):
                     raise IOError("Must initialize first: %r" % self)
                 else:
                     raise
+
+    def __del__(self):
+        self.shut_down()
 
 # Wrap all known attached spectrographs and add to this scope for importing
 locals().update(
