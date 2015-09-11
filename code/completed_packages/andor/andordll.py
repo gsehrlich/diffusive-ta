@@ -130,7 +130,7 @@ import os
 import platform
 from ._andorpath import _andor_exec
 from ._known import dlls_32, dlls_64
-from ._q_andor_obj import QAndorObject
+from ._q_andor_object import QAndorObject
 
 class AndorDLL(object):
     # Constructors for pointers that are used to get return values
@@ -269,6 +269,9 @@ class QAndorDLL(QAndorObject, AndorDLL):
     def __init__(self, lib_filename, header_filename, out=print):
         QAndorObject.__init__(self)
         AndorDLL.__init__(self, lib_filename, header_filename, out=out)
+
+    def __getattr__(self, name):
+        return AndorDLL.__getattr__(self, name)
 
 # Predefine DLLs based on given filenames
 # Which DLL to use depends on architecture:

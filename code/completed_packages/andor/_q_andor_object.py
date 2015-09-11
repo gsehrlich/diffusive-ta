@@ -15,5 +15,6 @@ class QAndorObject(QtCore.QObject):
 
     def signal_out(self, sep=" ", end="\n", *args):
         """Emit the message before writing to the desired stream"""
-        self.message.emit(sep.join(*args) + end)
-        self._out(*args, sep=sep, end=end)
+        self.message.emit(sep.join(args) + end)
+        if self._out is not None:
+            self._out(*args, sep=sep, end=end)

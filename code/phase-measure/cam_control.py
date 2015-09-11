@@ -30,31 +30,18 @@ class CameraControlWidget(gui.QWidget, Ui_Widget):
             return
         # Otherwise continue with __init__
         self.cam = cam
+        self.spec = self.cam.spec
         self.cam_thread = core.QThread()
         core.QTimer.singleShot(0, self.cam_thread.start)
         self.cam.moveToThread(self.cam_thread)
 
-        # Store the event processor
-        self.process_events = event_processor
-
-        self.buttons = (
-            self.initAllButton,
-            self.cooldownButton,
-            self.coolerOffButton,
-            self.restartCamButton,
-            self.restartAllButton
-            )
-        self.status_labels = (
-            self.cameraStatusLabel,
-            self.tempLabel,
-            self.coolerLabel,
-            self.programStatusLabel
-            )
-
-        # Set the labels
+        # Set the permanent labels
         self.titleLabel.setText(self.cam.name)
         self.serialLabel.setText(str(self.cam.serial))
-        self.place_status_placeholders()
+
+        # Create status and connect the status update signal to self.update_gui
+        self.state = CameraControlState(self)
+        self.state.gui_update.connect(self.update_gui)
 
         # NOTE: DON'T NEED TO CONNECT BUTTON SIGNALS TO SELF'S SLOTS. When the
         # slots are of the format on_objectName_signalName, setupUi will
@@ -69,121 +56,59 @@ class CameraControlWidget(gui.QWidget, Ui_Widget):
         self.cam_shut_down.connect(self.cam.shut_down)
         self.spec_shut_down.connect(self.cam.spec.shut_down)
 
-        # Connect camera's signals to self's slots
+        # Connect the restart buttons to the state's slots
+        self.restartCamButton.clicked.connect(
+            self.state.set_transition_shutting_down)
+        self.restartAllButton.clicked.connect(
+            self.state.set_transition_shutting_down)
+        self.initAllButton.clicked.connect(
+            self.state.set_transition_restarting)
 
         # Chain spec init, spec reg, and cam init
         self.spec.initialization_done.connect(self.spec.register)
         self.spec.registration_done.connect(self.cam.initialize)
 
-        # Create and connect a timer to update the camera status etc.
-        self.status_timer = core.QTimer()
-        self.status_timer.setInterval(100)
-        self.status_timer.timeout.connect(self.update_camera_status)
-        self.status_timer.timeout.connect(self.update_camera_temp)
-
+        # Create restart chain
+        self.spec.shutdown_done.connect(self.cam.shut_down)
+        self.cam.shutdown_done.connect(self.restart)
 
     def on_initAllButton_clicked(self):
-        self.initAllButton.setEnabled(False)
-        with self.all_buttons_disabled():
-            # Initialize and register the spectrometer
-            self.init_spec()
-
-    def on_spec_initialized(self):
-        self.init_cam()
-
-            # Do all the cam initialization stuff
-            self.init_cam()
-
-        # Enable relevant buttons that were disabled on startup
-        self.cooldownButton.setEnabled(True)
-        self.restartCamButton.setEnabled(True)
-        self.restartAllButton.setEnabled(True)
+        self.spec_initialize.emit() # chained to spec.register and cam.init
 
     def on_cooldownButton_clicked(self):
-        with self.all_buttons_disabled():
-            self.cool_down.emit(self.tempSpin.getValue())
-            self.update_camera_temp()
-
-        # Allow the user to turn off the cooler
-        self.coolerOffButton.setEnabled(True)
+        self.cool_down.emit(self.tempSpin.getValue())
 
     def on_coolerOffButton_clicked(self):
-        self.coolerOffButton.setEnabled(False)
-        with self.all_buttons_disabled():
-            self.cooler_off.emit()
-            self.update_camera_temp()
+        self.cooler_off.emit()
 
     def on_restartCamButton_clicked(self):
-        self.cooldownButton.setEnabled(False)
-        self.coolerOffButton.setEnabled(False)
-        self.restartCamButton.setEnabled(False)
-        self.restartAllButton.setEnabled(False)
-        self.tempSpin.setEnabled(False)
-
-        self.shut_down_cam()
-        self.init_cam()
-
-        self.cooldownButton.setEnabled(True)
-        self.restartCamButton.setEnabled(True)
-        self.restartAllButton.setEnabled(True)
+        self.cam_shut_down.emit()
 
     def on_restartAllButton_clicked(self):
-        self.cooldownButton.setEnabled(False)
-        self.coolerOffButton.setEnabled(False)
-        self.restartCamButton.setEnabled(False)
-        self.restartAllButton.setEnabled(False)
-        self.tempSpin.setEnabled(False)
-
-        self.shut_down_cam()
-        self.shut_down_spec()
-        self.init_spec()
-        self.init_cam()
-
-        self.cooldownButton.setEnabled(True)
-        self.restartCamButton.setEnabled(True)
-        self.restartAllButton.setEnabled(True)
-
-    def place_status_placeholders(self):
-        for label in (self.cameraStatusLabel,
-                      self.tempLabel,
-                      self.coolerLabel,
-                      self.programStatusLabel):
-            label.setText("waiting for init")
-
-    def update_camera_status(self):
-        self.cameraStatusLabel.setText(self.cam.get_status())
-
-    def update_camera_temp(self):
-        temp, cooler_status = cam.get_temp()
-        self.tempLabel.setText(str(temp))
-        self.coolerLabel.setText(cooler_status)
-
-    def init_spec(self):
-        self.spec_initialize.emit()
-        self.spec_register.emit()
-
-    def init_cam(self):
-        # Initalize and reigster the camera
-        self.cam_initialize.emit()
-        self.cam_register.emit()
-
-        # Set allowed temp range and default, then enable
-        self.tempSpin.setRange(self.cam.get_temp_range())
-        self.tempSpin.setValue(cam_info[cam.name]["temp"])
-        self.tempSpin.setEnabled(True)
-
-        # Start checking the camera status
-        self.status_timer.start()
-
-    def shut_down_cam(self):
-        self.status_timer.stop()
-        self.cooler_off.emit()
-        self.update_camera_temp()
-        self.cam_shut_down.emit()
-        self.place_status_placeholders()
-
-    def shut_down_spec(self):
         self.spec_shut_down.emit()
+
+    def restart(self):
+        if self.status.spec_initialized == False:
+            # Then the spectrograph was never shut down, so we only want to
+            # restart the camera
+            self.cam_initialize.emit()
+        else:
+            # Then we restart both, via a chain
+            self.spec_initialize.emit()
+
+    def update_gui(self, gui_choices, gui_statuses):
+        # Enable and disable stuff
+        for attr in gui_choices.__slots__:
+            getattr(self, attr).setEnabled(getattr(gui_choices, attr))
+
+        # Set label text and other parameters
+        for attr in ("cameraStatusLabel", "tempLabel", "coolerLabel",
+            "programStatusLabel"):
+            getattr(self, attr).setText(getattr(gui_statuses, attr))
+
+        self.tempSpin.setValue(gui_statuses.tempSpin_value)
+        self.tempSpin.setRange(
+            gui_statuses.tempSpin_min, gui_statuses.tempSpin_max)
 
     def closeEvent(self, event):
         self.cooldownButton.setEnabled(False)
@@ -197,23 +122,7 @@ class CameraControlWidget(gui.QWidget, Ui_Widget):
 
         event.accept()
 
-    @contextmanager
-    def all_buttons_disabled(self):
-        """Enable or disable all buttons"""
-        buttons_prev_enabled = []
-        for button in self.all_buttons:
-            if button.isEnabled():
-                buttons_prev_enabled.append(button)
-                button.setEnabled(False)
-        self.process_events()
-
-        yield
-
-        for button in buttons_prev_enabled:
-            button.setEnabled(True)
-        self.process_events()
-
-class CameraControlState(QObject):
+class CameraControlState(core.QObject):
     """Class for turning information about the program into GUI decisions
 
     This class curates up-to-date information about the state of the program
@@ -242,13 +151,13 @@ class CameraControlState(QObject):
     event loop while it executes, and then quits before the second one is
     accepted.
     """
-    self.gui_update = core.pyqtSignal(object, object)
+    gui_update = core.pyqtSignal(object, object)
 
-    class GuiEnabledState(object):
+    class GuiChoicesState(object):
         """Stores information about all the gui objects that need to be
         enabled or disabled"""
         __slots__ = (
-            "initButton",
+            "initAllButton",
             "cooldownButton",
             "coolerOffButton",
             "restartCamButton",
@@ -260,16 +169,18 @@ class CameraControlState(QObject):
         """Stores information about all the gui objects that need to have
         certain status text/parameters synced"""
         __slots__ = (
-            "cameraStatusLabel_text",
-            "tempLabel_text",
-            "coolerLabel_text",
-            "programStatusLabel_text"
+            "cameraStatusLabel",
+            "tempLabel",
+            "coolerLabel",
+            "programStatusLabel",
             "tempSpin_value",
             "tempSpin_max",
             "tempSpin_min",
             )
 
     def __init__(self, parent):
+        core.QObject.__init__(self)
+
         self.parent = parent
         self.cam = self.parent.cam
         # Ignore spectrometer initialization; needs to be registered too first
@@ -284,24 +195,30 @@ class CameraControlState(QObject):
         self.spec_initialized = False
         self.cam_initialized = False
         self.cooler_on = False
-        self.cam_status = "waiting for init"
+        self.cam_status = "init"
         self.cooler_status = "init"
-        self.temp = "waiting for init"
+        self.temp = "init"
         self.program_status = "waiting for init"
         self.transition_state = "idling"
         self.tempSpin_value = self.tempSpin_max = self.tempSpin_min = 0
         self.tempSpin_enabled = False
 
+        # Check for updates automatically every once in a while
+        self.timer = core.QTimer()
+        self.timer.setInterval(100)
+        self.timer.timeout.connect(self.update)
+        self.timer.start()
+
         self.update()
 
     def update(self):
-        # Create a self.GuiEnabledState struct to fill
-        gui_choices = self.GuiEnabledState()
+        # Create a self.GuiChoicesState struct to fill
+        gui_choices = self.GuiChoicesState()
 
         # Switch: which transition state? => enable/disable stuff
         {
             "idling": self.update_idling,
-            "initializing": self.update_initializing,
+            "shutting_down": self.update_shutting_down,
             "restarting": self.update_restarting,
             "starting_cooler": self.update_starting_cooler,
             "stopping_cooler": self.update_stopping_cooler
@@ -313,11 +230,11 @@ class CameraControlState(QObject):
         self.update_statuses(gui_statuses)
 
         # Send the update to the GUI
-        self.gui_update.emit(gui_enableds, gui_statuses)
+        self.gui_update.emit(gui_choices, gui_statuses)
 
-    def update_idling(self, gui_enabled_state):
+    def update_idling(self, gui_choices):
         if self.spec_initialized and self.cam_initialized:
-            gui_choices.initButton = False
+            gui_choices.initAllButton = False
             gui_choices.restartCamButton = True
             gui_choices.restartAllButton = True
 
@@ -328,7 +245,7 @@ class CameraControlState(QObject):
             gui_choices.coolerOffButton = True if self.cooler_on else False
 
         elif not self.spec_initialized and not self.cam_initialized:
-            gui_choices.initButton = True
+            gui_choices.initAllButton = True
             gui_choices.restartCamButton = False
             gui_choices.restartAllButton = False
             gui_choices.cooldownButton = False
@@ -340,13 +257,21 @@ class CameraControlState(QObject):
                   "were not both inited nor not-inited"
             raise Exception(msg)
 
+    def update_shutting_down(self, gui_choices):
+        """Stay busy and pass to restarting when the cam shuts down"""
+        if not cam_initialized:
+            self.transition_state = "restarting"
+            self.update_restarting(gui_choices)
+        else:
+            self.update_choices_busy(gui_choices)
+
     def update_restarting(self, gui_choices):
         """Stay busy until cam and spec are reinitialized"""
         if self.cam_initialized and self.spec_initialized:
             self.transition_state = "idling"
             self.update_idling(gui_choices)
         else:
-            update_choices_busy(gui_choices)
+            self.update_choices_busy(gui_choices)
 
     def update_starting_cooler(self, gui_choices):
         """Stay busy until cooler is on"""
@@ -354,7 +279,7 @@ class CameraControlState(QObject):
             self.transition_state = "idling"
             self.update_idling(gui_choices)
         else:
-            update_choices_busy(gui_choices)
+            self.update_choices_busy(gui_choices)
 
     def update_stopping_cooler(self, gui_choices):
         """Stay busy until cooler is off"""
@@ -362,7 +287,7 @@ class CameraControlState(QObject):
             self.transition_state = "idling"
             self.update_idling(gui_choices)
         else:
-            update_choices_busy(gui_choices)
+            self.update_choices_busy(gui_choices)
 
     def update_choices_busy(self, gui_choices):
         """Disable everything disableable"""
@@ -375,15 +300,27 @@ class CameraControlState(QObject):
 
     def update_statuses(self, gui_statuses):
         """Update and store statuses of cam, temp, cooler, and program"""
-        # Get cam status, temp, and cooler status from camera
-        self.cam_status = gui_statuses.cam_status = self.parent.cam.get_status()
-        self.temp, self.cooler_status = \
-            gui_statuses.temp, gui_statuses.cooler_status = \
-            self.parent.cam.get_temp()
+        if self.cam_initialized and self.spec_initialized:
+            # Get cam status, temp, and cooler status from camera
+            self.cam_status = gui_statuses.cam_status = \
+                self.parent.cam.get_status()
+            self.temp, self.cooler_status = \
+                gui_statuses.temp, gui_statuses.cooler_status = \
+                self.parent.cam.get_temp()
+
+        else:
+            for attr in ("cam_status", "temp", "cooler_status"):
+                setattr(self, attr, "init")
+            for attr in ("cameraStatusLabel", "tempLabel", "coolerLabel"):
+                setattr(gui_statuses, attr, "init")
 
         # Get the program status from self, which is informed whenever the
         # camera emits a message.
-        gui_statuses.program_status = self.program_status
+        gui_statuses.programStatusLabel = self.program_status
+
+        # Also get the spinBox values from self
+        for attr in ("tempSpin_value", "tempSpin_min", "tempSpin_max"):
+            setattr(gui_statuses, attr, getattr(self, attr))
 
     # Setter slots for states set by signals (no alliteration intended)
     def set_spec_to_initialized(self):
@@ -408,13 +345,11 @@ class CameraControlState(QObject):
     def set_program_status(self, s):
         self.program_status = s
         self.update()
-    def set_transition_restarting_cam(self):
-        self.cam_initialized = False
-        self.transition_state = "restarting"
+    def set_transition_shutting_down(self):
+        self.transition_state = "shutting_down"
         self.update()
-    def set_transition_restarting_all(self):
-        self.cam_initialized = self.spec_initialized = False
-        self.transition_state = "restarting"
+    def set_transition_restarting(self):
+        self.transition_state = "restarting" # also initializing
         self.update()
 
 def main(cam=default_cam):

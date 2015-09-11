@@ -9,6 +9,7 @@ Python.
 
 """
 
+from __future__ import print_function
 import time
 import threading
 import numpy as np
@@ -20,7 +21,7 @@ from ctypes import c_int, byref
 from PyQt4 import QtCore
 from contextlib import contextmanager
 
-class RepeatedTimer(threading.Timer):
+class RepeatedTimer(threading._Timer):
     def run(self):
         self.running = True
         while self.running:
@@ -144,7 +145,7 @@ class AndorCamera(object):
             if out: self.out("Making %s current:" % self.name,)
             cam_lib.SetCurrentCamera(self.handle)
             
-    def __init__(self, serial, spec, out=None):
+    def __init__(self, serial, spec, out=print):
         """Set up attributes for AndorCamera instance
 
         `out` should be a function that accepts *args and a kwargs 'sep', with
@@ -520,7 +521,7 @@ class AndorCamera(object):
         tot_time = cycle_time*n_accums
         return self.expose(read_mode, get_data_dt=tot_time, dark=dark)
 
-    def kinetic_get_data(read_mode, alloc=alloc):
+    def kinetic_get_data(read_mode, alloc=None):
         """Wrapped version of self.get_data used by self.kinetic"""
         # Copy any new data, starting from current image
         n_copied = self.get_data(read_mode, alloc=alloc,
@@ -638,7 +639,7 @@ class QAndorCamera(QAndorObject, AndorCamera):
 
     def __init__(self, serial, spec, out=None):
         QAndorObject.__init__(self)
-        AndorCamera.__init__(self)
+        AndorCamera.__init__(self, serial, spec, out=out)
 
     def initialize(self):
         AndorCamera.initialize(self)
@@ -667,7 +668,7 @@ class QAndorCamera(QAndorObject, AndorCamera):
         AndorCamera.accum(self, read_mode=read_mode, dark=dark, **kwargs)
         self.acquisition_done.emit()
 
-    def kinetic_get_data(read_mode, alloc=alloc):
+    def kinetic_get_data(read_mode, alloc=None):
         AndorCamera.kinetic_get_data(self, read_mode, alloc=alloc)
         if self.n_saved >= self.n_kinetics:
             self.acquisition_done.emit()

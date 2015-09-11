@@ -158,7 +158,10 @@ class QAndorShamrock(QAndorObject, AndorShamrock):
 
     def shut_down(self):
         AndorShamrock.shut_down(self)
-        self.shutdown_done.emit()
+        self.shutdown_done.emit()\
+
+    def __getattr__(self, name):
+        return AndorShamrock.__getattr__(self, name)
 
 # Wrap all known attached spectrographs and add to this scope for importing
 locals().update(
