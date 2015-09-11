@@ -3,17 +3,33 @@
 Spectrometers currently implemented: Andor Shamrock.
 """
 
+from __future__ import print_function
 from .andordll import spec_lib
 from ._andorpath import _get_andor_path
 from ._known import spectrometers
+from ._q_andor_object import QAndorObject
 import types
+from PyQt4 import QtCore
 
 class AndorShamrock(object):
     """Integrates functionality for interacting with Andor Shamrock"""
 
-    def __init__(self, serial):
+    @property
+    def out(self):
+        """Define `out` as a new property with the standard getter"""
+        return self._out
+    @out.setter
+    def out(self, val):
+        """Whenever `out` is changed, update spec_lib too"""
+        spec_lib.out = val
+        self._out = val
+
+    def __init__(self, serial, out=print):
         self.serial = serial
         self.attached_cameras = set()
+
+        # Store the passed out function (implicitly updating spec_lib)
+        self.out = out
 
     def initialize(self):
         """Initialize the Shamrock DLL wrapped by this object"""
@@ -24,7 +40,7 @@ class AndorShamrock(object):
         except IOError as e:
             if "NOT_INITIALIZED" in e.message:
                 # If not, initialize it and try again
-                print "Initializing...",
+                self.out("Initializing...", end=" ")
                 spec_lib.ShamrockInitialize()
             else:
                 # This shouldn't happen; that function throws only one error
@@ -123,7 +139,28 @@ class AndorShamrock(object):
     def __del__(self):
         self.shut_down()
 
+class QAndorShamrock(QAndorObject, AndorShamrock):
+    """Wrapped version of QAndorShamrock that implements four PyQt signals"""
+    initialization_done = QtCore.pyqtSignal()
+    registration_done = QtCore.pyqtSignal()
+    shutdown_done = QtCore.pyqtSignal()
+    def __init__(self, serial, out=print):
+        QAndorObject.__init__(self)
+        AndorShamrock.__init__(self, serial, out=out)
+
+    def initialize(self):
+        AndorShamrock.initialize(self)
+        self.initialization_done.emit()
+
+    def register(self):
+        AndorShamrock.register(self)
+        self.registration_done.emit()
+
+    def shut_down(self):
+        AndorShamrock.shut_down(self)
+        self.shutdown_done.emit()
+
 # Wrap all known attached spectrographs and add to this scope for importing
 locals().update(
-    {spectrometers[serial]: AndorShamrock(serial) for serial in spectrometers}
+    {spectrometers[serial]: QAndorShamrock(serial) for serial in spectrometers}
     )

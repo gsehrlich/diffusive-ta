@@ -123,12 +123,14 @@ documentation.
 
 """
 
+from __future__ import print_function
 from ctypes import *
 import re
 import os
 import platform
 from ._andorpath import _andor_exec
 from ._known import dlls_32, dlls_64
+from ._q_andor_obj import QAndorObject
 
 class AndorDLL(object):
     # Constructors for pointers that are used to get return values
@@ -167,7 +169,7 @@ class AndorDLL(object):
                 # argument is a Python value not to convert
                 return arg, False
     
-    def __init__(self, lib_filename, header_filename):
+    def __init__(self, lib_filename, header_filename, out=print):
         """Wrap Andor-formatted DLLs for straightforward use in Python"""
         self.lib = cdll.LoadLibrary(lib_filename)
         
@@ -191,6 +193,7 @@ class AndorDLL(object):
         
         self.consts = consts
         self.errs = errs
+        self.out = out
         
     def __getattr__(self, name):
         """Get the improved function from the wrapped library
@@ -248,7 +251,7 @@ class AndorDLL(object):
             # What to do depends on return value. If none, print SUCCESS.
             # Otherwise, just return the value.
             if len(to_return) == 0:
-                print msg
+                self.out(msg)
             elif len(to_return) == 1:
                 return to_return[0]
             else:
@@ -260,6 +263,13 @@ class AndorDLL(object):
             self.lib)
         return _new_func
 
+class QAndorDLL(QAndorObject, AndorDLL):
+    """Wrapped version of AndorDLL that implements one PyQt signal"""
+
+    def __init__(self, lib_filename, header_filename, out=print):
+        QAndorObject.__init__(self)
+        AndorDLL.__init__(self, lib_filename, header_filename, out=out)
+
 # Predefine DLLs based on given filenames
 # Which DLL to use depends on architecture:
 bitness = platform.architecture()[0]
@@ -268,5 +278,5 @@ dlls = dlls_64 if bitness == "64bit" else dlls_32
 # Add the DLLs to this scope for importing
 for varname, (subdir, dll, header) in dlls.items():
     locals().update(
-        {varname: _andor_exec(AndorDLL, args=(dll, header), subdir=subdir)}
+        {varname: _andor_exec(QAndorDLL, args=(dll, header), subdir=subdir)}
         )

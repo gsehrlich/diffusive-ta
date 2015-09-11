@@ -10,26 +10,40 @@ Python.
 """
 
 import time
+import threading
 import numpy as np
 from .andordll import cam_lib
 from .andorspectro import spec
 from ._known import cameras, cam_info
+from ._q_andor_object import QAndorObject
 from ctypes import c_int, byref
 from PyQt4 import QtCore
 from contextlib import contextmanager
+
+class RepeatedTimer(threading.Timer):
+    def run(self):
+        self.running = True
+        while self.running:
+            threading.Timer.run(self)
+    def stop(self):
+        self.running = False
+        threading.Timer.cancel(self)
+
+class WrappedQTimer(QtCore.QTimer):
+    def __init__(self, interval, function, args=[], kwargs={}):
+        super(WrappedQTimer, self).__init__()
+        self.setInterval(interval)
+        self.timeout.connect(lambda: function(*args, **kwargs))
 
 def product(l):
     """Return the product of the elements in the iterable"""
     return reduce(lambda x, y: x*y, l)
 
-class AndorCamera(QtCore.QObject):
+class AndorCamera(object):
     "Control Andor cameras attached to a USB-controlled Andor Shamrock"
-    func_call = QtCore.pyqtSignal(str, tuple, dict)
-    new_images = QtCore.pyqtSignal(int)
-    done_acquiring = QtCore.pyqtSignal()
-    abort_acquisition = QtCore.pyqtSignal()
-    aborted = QtCore.pyqtSignal()
-    already_idle = QtCore.pyqtSignal()
+    # Allow for overriding in subclass. Must have signature
+    # __init__(dt, func, args, kwargs). Must implement start() and stop().
+    TimerClass = RepeatedTimer
 
     # temp must be an int
     default_temp = {
@@ -52,11 +66,20 @@ class AndorCamera(QtCore.QObject):
         "image": 4
         }
 
-    @staticmethod
-    def _is_initialized(handle):
+    @property
+    def out(self):
+        """Define out as a property with the standard getter"""
+        return self._out
+    @out.setter
+    def out(self, val):
+        """When `out` is changed, change it in cam_lib too"""
+        cam_lib.out = val
+        self._out = val
+
+    def _is_initialized(self, handle):
         "Return True if the handle is already initialized, else False"
         # Set handle as current
-        print "Setting camera with handle %r as current:" % handle,
+        self.out("Setting camera with handle %r as current:" % handle, end=" ")
         cam_lib.SetCurrentCamera(handle)
 
         try:
@@ -73,50 +96,44 @@ class AndorCamera(QtCore.QObject):
             # If no error was raised, camera is already inited. Raise error
             return True
 
-    @classmethod
-    def get_handle_dict(cls, keep_serials_open=()):
+    def get_handle_dict(self, keep_serials_open=()):
         """Return a dict of serial numbers: handles.
 
         Warning: all cameras that were not already initialized will be
         initialized and then shut down (unless told to keep them open)."""
         # If this has already been done, just return the dict
-        if hasattr(cls, "handle_dict"):
-            return cls.handle_dict
+        if hasattr(AndorCamera, "handle_dict"):
+            return AndorCamera.handle_dict
 
         # Initialize the empty dict and begin looping through all the cameras
-        print "Finding camera handles of all serial numbers..."
+        self.out("Finding camera handles of all serial numbers...")
         handle_dict = {}
         for i in xrange(cam_lib.GetAvailableCameras(int)):
             # Get the handle
             handle = cam_lib.GetCameraHandle(i, int)
 
             # Set handle to current and find out whether it's initialized yet
-            was_preinitialized = cls._is_initialized(handle)
+            was_preinitialized = AndorCamera._is_initialized(handle)
 
             # If not, initialize it
             if not was_preinitialized:
-                print "Initializing:",
+                self.out("Initializing:", end=" ")
                 cam_lib.Initialize()
 
             # Find and store the serial number
             serial = cam_lib.GetCameraSerialNumber(int)
             handle_dict[serial] = handle
-            print "Found handle %r for serial %r" % (handle, serial)
+            self.out("Found handle %r for serial %r" % (handle, serial))
 
             # If the camera wasn't already inited, and the function wasn't
             # instructed to keep it open, close it.
             if not was_preinitialized and serial not in keep_serials_open:
-                print "Shutting down serial %r" % serial
+                self.out("Shutting down serial %r" % serial, end=" ")
                 cam_lib.ShutDown()
 
         # Store this in the class and then return it
-        cls.handle_dict = handle_dict
+        AndorCamera.handle_dict = handle_dict
         return handle_dict
-
-    # Makes it possible to call arbitrary methods through signals
-    @QtCore.pyqtSlot(str, tuple, dict)
-    def _call(self, name, args, kwargs):
-        getattr(self, str(name))(*args, **kwargs)
     
     def make_current(self, out=True):
         """Make sure cam_lib knows this is the current camera
@@ -124,17 +141,16 @@ class AndorCamera(QtCore.QObject):
         If handle is not defined yet, self.__getattr__ will raise a good error.
         """
         if cam_lib.GetCurrentCamera(int) != self.handle:
-            if out: print "Making %s current:" % self.name,
+            if out: self.out("Making %s current:" % self.name,)
             cam_lib.SetCurrentCamera(self.handle)
             
-    def __init__(self, serial, spec):
-        """Set up attributes for AndorCamera instance"""
+    def __init__(self, serial, spec, out=None):
+        """Set up attributes for AndorCamera instance
+
+        `out` should be a function that accepts *args and a kwargs 'sep', with
+        the intention of printing them somewhere."""
         # Initialize this as a QtCore.QObject so that it can have bound signals
         super(AndorCamera, self).__init__()
-
-        # Connect signals to their slots
-        self.func_call.connect(self._call)
-        self.abort_acquisition.connect(self.abort)
 
         # Store the serial number of the desired camera, and get the name
         self.serial = serial
@@ -143,6 +159,11 @@ class AndorCamera(QtCore.QObject):
         # Tell the camera and spectrometer they've been attached
         self.spec = spec
         self.spec.attached_cameras.add(self)
+
+        # Store the passed out function (implicitly updating cam_lib)
+        # and update `spec` with it too
+        self.out = out
+        self.spec.out = out
 
     def initialize(self):
         """Initialize the Andor DLL wrapped by this object"""
@@ -154,7 +175,7 @@ class AndorCamera(QtCore.QObject):
         was_preinitialized = self._is_initialized(handle)
         if not was_preinitialized:
             # If not, initialize it
-            print "Initializing:",
+            self.out("Initializing:", end=" ")
             cam_lib.Initialize()
 
         # Check if the serial number is right
@@ -166,24 +187,21 @@ class AndorCamera(QtCore.QObject):
             # Otherwise, look up all the handles' serial numbers to find
             # the correct one, and store it. This will keep the right one open.
             # Also keep the wrong one open until after this loop.
-            print ("Wrong serial number %r. Should be %r." % 
-                (serial, self.serial)),
+            self.out("Wrong serial number %r. Should be %r." % 
+                (serial, self.serial), out=" ")
             handle_dict = self.get_handle_dict(keep_serials_open=(self.serial,))
             self.handle = handle_dict[self.serial]
 
             # Then shut down the one that's wrong.
             if not was_preinitialized:
-                print ("Setting wrong camera with handle %r as current:" % 
-                        handle),
+                self.out("Setting wrong camera with handle %r as current:" % 
+                        handle, end=" ")
                 cam_lib.SetCurrentCamera(handle)
-                print "Shutting down wrong camera:",
+                self.out("Shutting down wrong camera:", end=" ")
                 cam_lib.ShutDown()
 
-    def register(self):
-        """Fetch information about this camera from DLL"""
-        self.make_current()
-
         # Set up detector size information
+        self.make_current()
         x, y = cam_lib.GetDetector(int, int)
         self.x = long(x)
         self.y = long(y)
@@ -193,19 +211,17 @@ class AndorCamera(QtCore.QObject):
             }
 
     def __getattr__(self, name):
-        """Throw comprehensible error if camera is not yet registered.
+        """Throw comprehensible error if camera is not yet initialized.
 
         This function will only be called if the attribute is not found through
         the usual means (e.g. the object __dict__ and all class and superclass
         __dict__s)."""
         # Create standard message
         message = "%r object has no attribute %r" % (type(self), name)
-        # If it's one of the attribute names defined in initialize or register,
+        # If it's one of the attribute names defined in initialize,
         # add additional explanation.
-        if name == "handle":
+        if name in ("handle", "x", "y", "img_dims"):
             message += ". Must call .initialize() first"
-        elif name in ("x", "y", "img_dims"):
-            message += ". Must call .register() first"
 
         raise AttributeError(message)
 
@@ -217,12 +233,12 @@ class AndorCamera(QtCore.QObject):
             temp = int(cam_info[self.name]["temp"])
         else:
             temp = int(temp)
-        print "Setting temp to %d:" % temp,
+        self.out("Setting temp to %d:" % temp, end=" ")
         cam_lib.SetTemperature(temp)
 
         # Start the cooldown
         # If no temperatue provided, will use whatever default the lib/cam has
-        print "Turning cooler on:",
+        self.out("Turning cooler on:", end=" ")
         cam_lib.CoolerON()
 
     def get_temp_range(self):
@@ -240,7 +256,7 @@ class AndorCamera(QtCore.QObject):
         # don't want usual return behavior, so go to ctypes.cdll object
         ret = cam_lib.lib.GetTemperature(byref(temp))
         if out:
-            print "\r\t%d, %s" % (temp.value, cam_lib.errs[ret])
+            self.out("\r\t%d, %s" % (temp.value, cam_lib.errs[ret]))
         return temp.value, cam_lib.errs[ret]
         
     def wait_until_cool(self, out=False, dt=5):
@@ -249,8 +265,8 @@ class AndorCamera(QtCore.QObject):
 
         stabilized = False
         if out:
-            print "Waiting for temp to reach %d" % self.temp
-            print "Temp is: "
+            self.out("Waiting for temp to reach %d" % self.temp)
+            self.out("Temp is: ")
         while not stabilized:
             temp, ret = self.get_temp(out=out)
             if ret == "DRV_TEMPERATURE_STABILIZED":
@@ -273,7 +289,7 @@ class AndorCamera(QtCore.QObject):
             self.assert_idle()
         except AssertionError:
             if out:
-                print "Waiting an extra %g seconds for idle..." % dt
+                self.out("Waiting an extra %g seconds for idle..." % dt)
             time.sleep(dt)
             self.assert_idle()        
         
@@ -297,40 +313,40 @@ class AndorCamera(QtCore.QObject):
         self.make_current()
 
         # Set the output flipper to direct light to this camera
-        print "Setting flipper mirror:"
+        self.out("Setting flipper mirror:", end=" ")
         self.spec.ShamrockSetFlipperMirror(
             2,                              # it's an OUTPUT flipper
             cam_info[self.name]["port"])    # which port this camera is in
 
         # Set required parameters
-        print "Setting acquisition mode:",
+        self.out("Setting acquisition mode:", end=" ")
         cam_lib.SetAcquisitionMode(acq_mode)
-        print "Setting read mode:",
+        self.out("Setting read mode:", end=" ")
         cam_lib.SetReadMode(self.read_modes[read_mode])
 
         # Set timing-related parameters
-        print "Setting exposure time:",
+        self.out("Setting exposure time:", end=" ")
         cam_lib.SetExposureTime(float(exp_time))
         if accum_cycle_time is not None:
-            print "Setting accumulation cycle time:",
+            self.out("Setting accumulation cycle time:", end=" ")
             cam_lib.SetAccumulationCycleTime(float(accum_cycle_time))
         if n_accums is not None:
-            print "Setting number of accumulations:",
+            self.out("Setting number of accumulations:", end=" ")
             cam_lib.SetNumberAccumulations(n_accums)
         if kin_cycle_time is not None:
-            print "Setting kinetic cycle time:",
+            self.out("Setting kinetic cycle time:", end=" ")
             cam_lib.SetKineticCycleTime(float(kin_cycle_time))
         if n_kinetics is not None:
-            print "Setting number of kinetics:",
+            self.out("Setting number of kinetics:", end=" ")
             cam_lib.SetNumberKinetics(n_kinetics)
-        print "Setting trigger mode:",
+        self.out("Setting trigger mode:", end=" ")
         cam_lib.SetTriggerMode(self.trigger_modes[trigger])
         if fast_external:
             cam_lib.SetFastExtTrigger(1)
 
         # The camera isn't connected to the shutter, so tell it not to try
         # to do anything different
-        print "Making camera ignore shutter:",
+        self.out("Making camera ignore shutter:", end=" ")
         cam_lib.SetShutter(
             0,                  # Output TTL low open
             2,                  # Permanently closed: send no signals
@@ -342,7 +358,7 @@ class AndorCamera(QtCore.QObject):
         
         # Set up spectrometer
         if slit is not None:
-            print "Setting slit width:",
+            self.out("Setting slit width:", end=" ")
             self.spec.ShamrockSetSlit(float(slit))
         if wavelen is not None:
             self.spec.ShamrockSetWavelength(float(wavelen))
@@ -375,14 +391,14 @@ class AndorCamera(QtCore.QObject):
         # Make sure camera and spectrometer are ready
         self.assert_idle()
         if dark:
-            print "Making sure Shamrock shutter is closed..."
+            self.out("Making sure Shamrock shutter is closed...", end=" ")
             self.spec.ShamrockSetShutter(0)
         else:
-            print "Opening Shamrock shutter..."
+            self.out("Opening Shamrock shutter...", end=" ")
             self.spec.ShamrockSetShutter(1)
 
         # Tell the camera to start
-        print "Starting acquisition..."
+        self.out("Starting acquisition...", end=" ")
         cam_lib.StartAcquisition()
 
         # If wait_time is given, wait for it to finish, get data, and return it
@@ -393,7 +409,7 @@ class AndorCamera(QtCore.QObject):
 
             # If the shutter was opened, close it
             if not dark:
-                print "Closing shutter..."
+                self.out("Closing shutter...", end=" ")
                 self.spec.ShamrockSetShutter(0)
             
             return self.get_data(read_mode)
@@ -425,7 +441,7 @@ class AndorCamera(QtCore.QObject):
         # Check if camera is stabilized; if not, send warning
         temp, status = self.get_temp()
         if ret != "DRV_TEMPERATURE_STABILIZED":
-            print "Warning: %r; temp %d" % (cam_lib.errs[ret], temp)
+            self.out("Warning: %r; temp %d" % (cam_lib.errs[ret], temp))
 
         # Find out which images to gather, and how many total
         try:
@@ -471,10 +487,8 @@ class AndorCamera(QtCore.QObject):
         # Otherwise, return the number of images transferred to the array
         if alloc is None:
             return data
-        # Otherwise, send the signal that new images are available, and
-        # return the number of images transferred to the array
+        # Otherwise, return the number of images transferred to the array
         else: 
-            self.new_images.emit(n_copied)
             return n_copied
     
     def single_scan(self, read_mode="fullbin", dark=False, **kwargs):
@@ -506,6 +520,19 @@ class AndorCamera(QtCore.QObject):
         tot_time = cycle_time*n_accums
         return self.expose(read_mode, get_data_dt=tot_time, dark=dark)
 
+    def kinetic_get_data(read_mode, alloc=alloc):
+        """Wrapped version of self.get_data used by self.kinetic"""
+        # Copy any new data, starting from current image
+        n_copied = self.get_data(read_mode, alloc=alloc,
+            n_start=self.n_saved)
+        # Update which image we're on now (shouldn't exceed self.n_kinetics)
+        self.n_saved += n_copied
+        # If we're done, stop the timer that's calling this and make sure the
+        # camera is idle
+        if self.n_saved >= self.n_kinetics:
+            self.timer.stop()
+            self.patient_assert_idle(dt=1)
+
     def kinetic(self, alloc, read_mode="fullbin", dark=False, **kwargs):
         """Take a kinetic series and write the data continuously to alloc"""
         # Set defaults for kwargs passed to prep_aquisition
@@ -525,28 +552,26 @@ class AndorCamera(QtCore.QObject):
         # Check that alloc has the correct dimensions and dtype
         self.check_array(alloc, n_kinetics, read_mode)
 
+        # Create a timer and hook it up to the alloc updater. Check for new
+        # data ten times as frequently as we expect images (ms), but at least
+        # 10 Hz
+        interval = min(int(kin_time*100), 100)
+        self.n_saved = 0
+        self.n_kinetics = n_kinetics
+        self.timer = self.TimerClass(interval, self.kinetic_get_data,
+            args=(read_mode,), kwargs={"alloc": alloc})
+
         # Start the exposure, but don't wait to get data
         self.expose()
+        self.timer.start()
 
-        # LOOP: continuously save data to the array until every accumulation
-        # is copied.
-        n_saved = 0
-        while n_saved < n_kinetics:
-            n_new = self.get_data(read_mode, alloc=alloc, n_start=n_saved)
-
-            # Update counters and wait for the next loop
-            n_saved += n_new
-            time.sleep(kin_time*0.1)
-
-        self.patient_assert_idle(dt=1)
-        self.done_acquiring.emit()
-
-    def scan_until_abort(self, alloc, read_mode="fullbin", dark=False, **kwargs):
+    def scan_until_abort(self, alloc, read_mode="fullbin", dark=False,
+        **kwargs):
         """Take images continuously until aborted, writing continuously"""
         # Set default for kwargs passed to prep_aquisition
         kwargs.setdefault("kin_cycle_time", 0)
 
-        print "kin_cycle_time: %r" % kwargs["kin_cycle_time"]
+        self.out("kin_cycle_time: %r" % kwargs["kin_cycle_time"])
 
         # Set up acquisition in kinetic mode.
         # Get actual kinetic cycle time and number of cycles -->
@@ -559,23 +584,16 @@ class AndorCamera(QtCore.QObject):
         # Check that alloc has the correct dimensions and dtype & get img size
         img_size = self.check_array(alloc, 1, read_mode)
 
-        # Create a QTimer and hook it up to the alloc updater. Then create
-        # another signal, for stop acquisition, and hook it up to timer.stop
-        # and the acquisition updater
-        def _tmp():
-            n = self.get_data(read_mode, alloc=alloc)
-            if n > 0:
-                self.new_images.emit(n)
-        self.scan_until_abort_slot = _tmp
-        self.scan_until_abort_timer = QtCore.QTimer()
-        # check ten times as frequently as we expect images (ms), but at least
+        # Create a timer and hook it up to the alloc updater. Check for new
+        # data ten times as frequently as we expect images (ms), but at least
         # 10 Hz
-        self.scan_until_abort_timer.setInterval(min(int(kin_time*100), 100))
-        self.scan_until_abort_timer.timeout.connect(self.scan_until_abort_slot)
+        interval = min(int(kin_time*100), 100)
+        self.timer = self.TimerClass(interval, self.get_data,
+            args=(read_mode,), kwargs={"alloc": alloc})
 
         # Start the acquisition and return
         self.expose()
-        self.scan_until_abort_timer.start()
+        self.timer.start()
         return
 
     def abort(self):
@@ -595,11 +613,7 @@ class AndorCamera(QtCore.QObject):
             self.get_data(self.scan_until_abort_read_mode)
 
             # destroy the timer and slot so no new data copying is attempted
-            del self.scan_until_abort_timer, self.scan_until_abort_slot
-
-            self.aborted.emit()
-        else:
-            self.already_idle.emit()
+            del self.scan_until_abort_timer
 
     def cooler_off(self):
         self.make_current()
@@ -610,7 +624,67 @@ class AndorCamera(QtCore.QObject):
         self.cooler_off()
         cam_lib.ShutDown()
 
+class QAndorCamera(QAndorObject, AndorCamera):
+    "Wrapped version of AndorCamera that implements PyQt signals and timing"
+    TimerClass = WrappedQTimer
+
+    initialization_done = QtCore.pyqtSignal()
+    cooldown_started = QtCore.pyqtSignal(int)
+    new_images = QtCore.pyqtSignal(int)
+    acquisition_done = QtCore.pyqtSignal()
+    abortion_done = QtCore.pyqtSignal()
+    cooldown_stopped = QtCore.pyqtSignal()
+    shutdown_done = QtCore.pyqtSignal()
+
+    def __init__(self, serial, spec, out=None):
+        QAndorObject.__init__(self)
+        AndorCamera.__init__(self)
+
+    def initialize(self):
+        AndorCamera.initialize(self)
+        self.initialization_done.emit()
+
+    def cooldown(self, temp=None):
+        AndorCamera.cooldown(self, temp=temp)
+        self.cooldown_started.emit(temp)
+
+    def get_data(self, read_mode, alloc=None, n_start=0):
+        if alloc is None:
+            return AndorCamera.get_data(self, read_mode, alloc=alloc,
+                                        n_start=n_start)
+        else:
+            n_copied = AndorCamera.get_data(self, read_mode, alloc=alloc,
+                                            n_start=n_start)
+            if n_copied > 0:
+                self.new_images.emit(n_copied)
+            return n_copied
+
+    def single_scan(self, read_mode="fullbin", dark=False, **kwargs):
+        AndorCamera.single_scan(self, read_mode=read_mode, dark=dark, **kwargs)
+        self.acquisition_done.emit()
+
+    def accum(self, read_mode="fullbin", dark=False, **kwargs):
+        AndorCamera.accum(self, read_mode=read_mode, dark=dark, **kwargs)
+        self.acquisition_done.emit()
+
+    def kinetic_get_data(read_mode, alloc=alloc):
+        AndorCamera.kinetic_get_data(self, read_mode, alloc=alloc)
+        if self.n_saved >= self.n_kinetics:
+            self.acquisition_done.emit()
+
+    def abort(self):
+        AndorCamera.abort(self)
+        self.abortion_done.emit()
+
+    def cooler_off(self):
+        AndorCamera.cooler_off(self)
+        self.cooldown_stopped.emit()
+
+    def shut_down(self):
+        AndorCamera.shut_down(self)
+        self.shutdown_done.emit()
+
 # Add known cameras to scope for importing
 locals().update(
-    {cameras[serial]: AndorCamera(serial, spec) for serial in cameras}
+    {cameras[serial]: QAndorCamera(serial, spec) for serial in cameras}
     )
