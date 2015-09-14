@@ -31,20 +31,26 @@ class AndorShamrock(object):
         # Store the passed out function (implicitly updating spec_lib)
         self.out = out
 
-    def initialize(self):
-        """Initialize the Shamrock DLL wrapped by this object"""
-
+    @staticmethod
+    def is_initialized():
+        """Check if the Shamrock library is initialized."""
         try:
             # Check if Shamrock library is already initialized
             spec_lib.ShamrockGetNumberDevices(int)
+            return True
         except IOError as e:
             if "NOT_INITIALIZED" in e.message:
-                # If not, initialize it and try again
-                self.out("Initializing...", end=" ")
-                spec_lib.ShamrockInitialize()
+                # If not, return False
+                return False
             else:
                 # This shouldn't happen; that function throws only one error
                 raise
+
+    def initialize(self):
+        """Initialize the Shamrock DLL wrapped by this object"""
+        if not self.is_initialized():
+            self.out("Initializing Shamrock library:", end=" ")
+            spec_lib.ShamrockInitialize()
 
     def register(self):
         """Find the index of the spectrometer with this serial number"""
@@ -60,6 +66,7 @@ class AndorShamrock(object):
 
     def shut_down(self):
         """Shut down gracefully"""
+        self.out("Shutting down Shamrock library...", end=" ")
         self.ShamrockClose()
 
     def __getattr__(self, name):
@@ -101,10 +108,12 @@ class AndorShamrock(object):
             # Write metadata for clarity
             self._write_metadata(new_func, name)
 
-            # Return a static method built from that function
+            # Build and store a static method built from that function
             new_func = staticmethod(new_func)
             setattr(AndorShamrock, name, new_func)
-            return new_func
+
+            # Need to introspect to get a callable version
+            return getattr(self, name)
         else:
             # Plug in the index as the first arg and pass the rest to the
             # error handler. This will be a method, so make the first arg
@@ -144,9 +153,11 @@ class QAndorShamrock(QAndorObject, AndorShamrock):
     initialization_done = QtCore.pyqtSignal()
     registration_done = QtCore.pyqtSignal()
     shutdown_done = QtCore.pyqtSignal()
-    def __init__(self, serial, out=print):
+    def __init__(self, serial, out=None):
         QAndorObject.__init__(self)
         AndorShamrock.__init__(self, serial, out=out)
+
+        spec_lib.message.connect(self.message)
 
     def initialize(self):
         AndorShamrock.initialize(self)

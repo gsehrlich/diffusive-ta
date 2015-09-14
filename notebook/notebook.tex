@@ -468,4 +468,12 @@ Final thought: I still need to remember to make two aspects of the boxcar averag
 \item When the averaging stops, reset everything to zero so that it doesn't add on to existing data next time.
 \end{enumerate}
 
+\labday{2015.09.14}
+
+Much progress. Just pausing to record a solution to an error (more on the Tale of Poorly Documented Connection Types): I was told I was creating and starting \verb QTimer  from different threads, which is an error. I was connecting \verb thread.started  to the slot that makes the timer, and only afterwards I was moving the object with that slot to the new thread. I switched the order---first move to thread, then connect---and now it works. I infer that the \verb AutoConnection  connection type decides whether to queue or connect directly at connection time.
+
+Another realization: I have to be careful when I'm storing QObjects as attributes of other QObjects and I intend to send signals to the attributes. I was running into an error in which the GUI thread would block during spectrometer initialization but not camera initialization, and it was because I had moved the camera to a new thread without realizing that the spectrometer it referenced was left behind in the GUI thread.
+
+Two more confusing not-quite-errors that I think I've fixed without understanding them. When I'm given a warning that QTimers cannot be stopped or started from another thread, sometimes I'm not even starting or stopping a QTimer. Also, sometimes the program randomly crashes after initialization is done. I fixed both of these problems by making everything thread-safe (duh): when changing something about the GUI, do it via a signal, not by calling the widget's method directly. (I'm still using read-only methods directly because using signals for that sounds hard.)
+
 \end{document} 

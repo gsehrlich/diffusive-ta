@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>202</width>
-    <height>321</height>
+    <height>331</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -104,9 +104,9 @@
    <widget class="QLabel" name="coolerLabel">
     <property name="geometry">
      <rect>
-      <x>90</x>
+      <x>50</x>
       <y>70</y>
-      <width>81</width>
+      <width>121</width>
       <height>16</height>
      </rect>
     </property>
@@ -150,7 +150,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>Cooler status:</string>
+     <string>Status:</string>
     </property>
    </widget>
    <widget class="QSpinBox" name="tempSpin">
@@ -227,11 +227,17 @@
      <x>10</x>
      <y>300</y>
      <width>181</width>
-     <height>16</height>
+     <height>31</height>
     </rect>
    </property>
    <property name="text">
     <string>(program status)</string>
+   </property>
+   <property name="alignment">
+    <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignTop</set>
+   </property>
+   <property name="wordWrap">
+    <bool>true</bool>
    </property>
   </widget>
   <widget class="QPushButton" name="restartAllButton">

@@ -77,10 +77,20 @@ class AndorCamera(object):
         cam_lib.out = val
         self._out = val
 
-    def _is_initialized(self, handle):
-        "Return True if the handle is already initialized, else False"
+    def is_initialized(self, handle=None):
+        """Return True if the handle is already initialized, else False.
+
+        If no handle provided, check if the instance has a handle yet. If so,
+        return True, else return False."""
+        if handle is None:
+            if not hasattr(self, "handle"):
+                return False
+            else:
+                handle = self.handle
+
         # Set handle as current
-        self.out("Setting camera with handle %r as current:" % handle, end=" ")
+        self.out("Setting camera with handle %r as current:" % handle,
+            end=" ")
         cam_lib.SetCurrentCamera(handle)
 
         try:
@@ -102,9 +112,9 @@ class AndorCamera(object):
 
         Warning: all cameras that were not already initialized will be
         initialized and then shut down (unless told to keep them open)."""
-        # If this has already been done, just return the dict
-        if hasattr(AndorCamera, "handle_dict"):
-            return AndorCamera.handle_dict
+        # NO EASY WAY TO STORE THIS DICT AFTER MAKING IT ONCE. Handles may
+        # change randomly when the cameras are not initialized, so need to
+        # check each time.
 
         # Initialize the empty dict and begin looping through all the cameras
         self.out("Finding camera handles of all serial numbers...")
@@ -114,7 +124,7 @@ class AndorCamera(object):
             handle = cam_lib.GetCameraHandle(i, int)
 
             # Set handle to current and find out whether it's initialized yet
-            was_preinitialized = AndorCamera._is_initialized(handle)
+            was_preinitialized = self.is_initialized(handle)
 
             # If not, initialize it
             if not was_preinitialized:
@@ -133,7 +143,6 @@ class AndorCamera(object):
                 cam_lib.ShutDown()
 
         # Store this in the class and then return it
-        AndorCamera.handle_dict = handle_dict
         return handle_dict
     
     def make_current(self, out=True):
@@ -168,15 +177,16 @@ class AndorCamera(object):
 
     def initialize(self):
         """Initialize the Andor DLL wrapped by this object"""
+        if self.is_initialized(): raise Exception("%r already inited!" % self.name)
         # Try handle corresponding to index given in cam_info
         ind = cam_info[self.name]["index"]
         handle = cam_lib.GetCameraHandle(ind, int)
 
         # Set handle as current and find out whether it's initialized yet
-        was_preinitialized = self._is_initialized(handle)
+        was_preinitialized = self.is_initialized(handle)
         if not was_preinitialized:
             # If not, initialize it
-            self.out("Initializing:", end=" ")
+            self.out("Initializing %r:" % self.name, end=" ")
             cam_lib.Initialize()
 
         # Check if the serial number is right
@@ -189,7 +199,7 @@ class AndorCamera(object):
             # the correct one, and store it. This will keep the right one open.
             # Also keep the wrong one open until after this loop.
             self.out("Wrong serial number %r. Should be %r." % 
-                (serial, self.serial), out=" ")
+                (serial, self.serial), end=" ")
             handle_dict = self.get_handle_dict(keep_serials_open=(self.serial,))
             self.handle = handle_dict[self.serial]
 
@@ -608,6 +618,7 @@ class AndorCamera(object):
 
             # stop camera from getting new data
             self.make_current()
+            self.out("Aborting acquisition...", end=" ")
             cam_lib.AbortAcquisition()
 
             # clean out data register
@@ -618,12 +629,15 @@ class AndorCamera(object):
 
     def cooler_off(self):
         self.make_current()
+        self.out("Turning cooler off...", end=" ")
         cam_lib.CoolerOFF()
 
     def shut_down(self):
         """Shut down gracefully"""
         self.cooler_off()
+        self.out("Shutting down %r..." % self.name, end=" ")
         cam_lib.ShutDown()
+        del self.handle
 
 class QAndorCamera(QAndorObject, AndorCamera):
     "Wrapped version of AndorCamera that implements PyQt signals and timing"
@@ -640,6 +654,11 @@ class QAndorCamera(QAndorObject, AndorCamera):
     def __init__(self, serial, spec, out=None):
         QAndorObject.__init__(self)
         AndorCamera.__init__(self, serial, spec, out=out)
+
+        cam_lib.message.connect(self.message)
+
+    def __getattr__(self, name):
+        AndorCamera.__getattr__(self, name)
 
     def initialize(self):
         AndorCamera.initialize(self)

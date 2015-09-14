@@ -266,7 +266,7 @@ class AndorDLL(object):
 class QAndorDLL(QAndorObject, AndorDLL):
     """Wrapped version of AndorDLL that implements one PyQt signal"""
 
-    def __init__(self, lib_filename, header_filename, out=print):
+    def __init__(self, lib_filename, header_filename, out=None):
         QAndorObject.__init__(self)
         AndorDLL.__init__(self, lib_filename, header_filename, out=out)
 
