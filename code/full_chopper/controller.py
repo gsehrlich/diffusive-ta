@@ -1,8 +1,9 @@
 from PyQt4 import QtCore
 import multiprocessing
-#import serial
-import fake_device as serial
+import serial
 import time
+import _winreg as winreg
+import itertools
 
 class ChopperController(QtCore.QObject):
     start = QtCore.pyqtSignal(name="start")
@@ -37,8 +38,38 @@ class ChopperProcess(multiprocessing.Process):
         self.pipe = pipe_connection
         self.daemon = True
 
+    # from http://stackoverflow.com/questions/1205383/
+    # listing-serial-com-ports-on-windows
+    @staticmethod
+    def _enumerate_serial_ports():
+        """ Uses the Win32 registry to return a iterator of serial 
+            (COM) ports existing on this computer.
+        """
+        path = 'HARDWARE\\DEVICEMAP\\SERIALCOMM'
+        try:
+            key = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, path)
+        except WindowsError:
+            raise IterationError
+
+        for i in itertools.count():
+            try:
+                val = winreg.EnumValue(key, i)
+                yield (str(val[1]), str(val[0]))
+            except EnvironmentError:
+                break
+
     def run(self):
-        self.chopper = serial.Serial(port="COM3", baudrate=115200, timeout=1)
+        for port_name, _ in self._enumerate_serial_ports():
+            device = serial.Serial(port=port_name, timeout=1, baudrate=115200)
+            device.write('id?\r')
+            time.sleep(1)
+            s = device.readall()
+            print s
+            if "MC2000" in s:
+                self.chopper = device
+                break
+        else:
+            raise IOError("Chopper not found")
 
         while True:
             if self.pipe.poll():
