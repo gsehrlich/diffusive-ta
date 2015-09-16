@@ -34,16 +34,19 @@ class DelayStage(QObject):
             self.throwMessage.emit("delaystage was disconnected",0)
         else:
             self.throwMessage.emit("Initialize delaystage:",0)
-            self.ser.port=int(self.parent.ComPort.value()-1)
-            self.ser.baudrate=19200
-            self.ser.parity='N'
+            self.ser.port="COM%d" % self.parent.ComPort.value()
+            self.ser.baudrate=57600
+            self.ser.parity=serial.PARITY_NONE
             self.ser.stopbits=1
-            self.ser. bytesize=8
+            self.ser.bytesize=8
+            self.ser.xonxoff = True
             self.ser.timeout=1
             if not self.ser.isOpen():
                 self.ser.open()
             if self.ser.isOpen():
-                if "FMS300PP" in self.getInfo("1ID?"):
+                s = self.getInfo("1ID?")
+                print "%r" % s
+                if "FMS300PP" in s:
                     self.throwMessage.emit("--> Motor activated",2)
                     self.parent.motorPosition.setValue(self.getPosition())
                     self.moveFinished.emit(self.getPosition())
@@ -63,16 +66,16 @@ class DelayStage(QObject):
         self.parent.ledMotion.setChecked(status)
     def sendCommand(self,text):
         lock=QtCore.QMutexLocker(self.mutex)
-        self.ser.write((text+"\r").encode)
+        self.ser.write(text+"\r\n")
     def getInfo(self,request):
         lock=QtCore.QMutexLocker(self.mutex)
         self.sendCommand(request)
-        return self.ser.readline[len(request):]
+        return self.ser.readline()[len(request)-1:]
     def getPosition(self):
         return(float(self.getInfo("1TP?")))
     def isMoving(self):
         lock=QtCore.QMutexLocker(self.mutex)
-        controller_state = self.getInfo("1TS?")[-2:]
+        controller_state = self.getInfo("1TS?")[-4:-2]
         return (controller_state in ("1E", "1F", "28"))
     def moveAction(self):
         lock=QtCore.QMutexLocker(self.mutex)
@@ -95,13 +98,13 @@ class DelayStage(QObject):
         if wait:
             self.moveAction()
         else:
-            self.MoveThread.executeFunction(self.moveAction)
+            self.moveThread.executeFunction(self.moveAction)
     def moveRelative(self,position,wait=False):
         self.sendCommand("1PR%1f"%position)
         if wait:
             self.moveAction()
         else:
-            self.MoveThread.executeFunction(self.moveAction)
+            self.moveThread.executeFunction(self.moveAction)
     def sendMessage(self,msg):
         answer=str(self.getInfo(msg))
         if answer=="":
@@ -156,7 +159,7 @@ class DelayStageWidget(QWidget):
     def on_BSendCommand_clicked(self):
         if self.ledDelayStage.isChecked():
             self.delaystage.throwMessage.emit("Send to delaystage: "+self.sendCommand.text(),0)
-            self.delaystage.throwMessage.emit(self.delaystage.sendMessage(self.sendCommand.text()),0)
+            self.delaystage.throwMessage.emit(self.delaystage.sendMessage(str(self.sendCommand.text())),0)
     @pyqtSlot()
     def on_BRedefinePosition_clicked(self):
         if self.ledDelayStage.isChecked():
