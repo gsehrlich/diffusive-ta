@@ -279,8 +279,8 @@ class AndorCamera(object):
             self.out("Waiting for temp to reach %d" % self.temp)
             self.out("Temp is: ")
         while not stabilized:
-            temp, ret = self.get_temp(out=out)
-            if ret == "DRV_TEMPERATURE_STABILIZED":
+            temp, status = self.get_temp(out=out)
+            if status == "DRV_TEMPERATURE_STABILIZED":
                 stabilized = True
             # Wait dt seconds in between checking whether it's stabilized
             if not stabilized: time.sleep(dt)
@@ -376,7 +376,7 @@ class AndorCamera(object):
         
         return actual_times
     
-    def get_new_array(self, n_images, read_mode):
+    def get_new_array(self, n_images, read_mode="fullbin"):
         """Create an array to store the captured images"""
         return np.zeros((n_images,) + self.img_dims[read_mode], dtype=np.int32)
 
@@ -410,7 +410,10 @@ class AndorCamera(object):
 
         # Tell the camera to start
         self.out("Starting acquisition...", end=" ")
-        cam_lib.StartAcquisition()
+        try: cam_lib.StartAcquisition()
+        except IOError as e:
+            if not "DRV_ACQUIRING" in e.message:
+                raise
 
         # If wait_time is given, wait for it to finish, get data, and return it
         # (Else return without doing anything more) 
@@ -451,8 +454,8 @@ class AndorCamera(object):
 
         # Check if camera is stabilized; if not, send warning
         temp, status = self.get_temp()
-        if ret != "DRV_TEMPERATURE_STABILIZED":
-            self.out("Warning: %r; temp %d" % (cam_lib.errs[ret], temp))
+        if status != "DRV_TEMPERATURE_STABILIZED":
+            self.out("Warning: %r; temp %d" % (status, temp))
 
         # Find out which images to gather, and how many total
         try:
@@ -461,7 +464,10 @@ class AndorCamera(object):
             if not "NO_NEW" in e.message:
                 raise e
             else:
-                return 0 # zero new images
+                if alloc is None:
+                    return self.get_new_array(0, read_mode) # zero-length array
+                else:
+                    return 0 # zero new images
 
         # Check how many images are available
         n_avail = 1 + last - first
@@ -614,7 +620,7 @@ class AndorCamera(object):
         except AssertionError:
             # camera is NOT idle
             # stop copying data from camera
-            self.scan_until_abort_timer.stop()
+            self.timer.stop()
 
             # stop camera from getting new data
             self.make_current()
@@ -625,7 +631,7 @@ class AndorCamera(object):
             self.get_data(self.scan_until_abort_read_mode)
 
             # destroy the timer and slot so no new data copying is attempted
-            del self.scan_until_abort_timer
+            del self.timer
 
     def cooler_off(self):
         self.make_current()
