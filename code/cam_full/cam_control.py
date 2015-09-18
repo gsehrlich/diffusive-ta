@@ -14,6 +14,7 @@ Ui_Widget, QtBaseClass = uic.loadUiType(ui_filename)
 class CameraControlWidget(gui.QWidget, Ui_Widget):
     get_ready_to_close = core.pyqtSignal()
     cam_initialize_done = core.pyqtSignal()
+    cam_shut_down = core.pyqtSignal()
 
     def __init__(self, cam=None):
         gui.QWidget.__init__(self)
@@ -71,8 +72,11 @@ class CameraControlWidget(gui.QWidget, Ui_Widget):
         # Keep from closing, and pass on the message
         self.cam_controller.cam_initialize_done.connect(
             self.not_ready_to_close)
+
+        # Tell listeners when the cam is started or shut down
         self.cam_controller.cam_initialize_done.connect(
             self.cam_initialize_done)
+        self.cam_controller.cam_shut_down.connect(self.cam_shut_down)
 
     def place_status_placeholders(self):
         for label in (self.cameraStatusLabel,

@@ -380,8 +380,10 @@ class AndorCamera(object):
         """Create an array to store the captured images"""
         return np.zeros((n_images,) + self.img_dims[read_mode], dtype=np.int32)
 
-    def check_array(self, alloc, n_images, read_mode):
+    def check_array(self, alloc, read_mode, n_images=None):
         # Check that supplied array works; raise an error if not
+        if n_images is None:
+            n_images = len(alloc)
         correct_shape = (long(n_images),) + self.img_dims[read_mode]
         template = "Supplied array has wrong %s %r; should be %r"
         if alloc.shape != correct_shape:
@@ -537,18 +539,21 @@ class AndorCamera(object):
         tot_time = cycle_time*n_accums
         return self.expose(read_mode, get_data_dt=tot_time, dark=dark)
 
-    def kinetic_get_data(read_mode, alloc=None):
-        """Wrapped version of self.get_data used by self.kinetic"""
+    def cont_get_data(self, alloc, read_mode, loop=False):
+        """Keep track of where in the array to start copying data"""
         # Copy any new data, starting from current image
         n_copied = self.get_data(read_mode, alloc=alloc,
             n_start=self.n_saved)
-        # Update which image we're on now (shouldn't exceed self.n_kinetics)
+        # Update which image we're on now (shouldn't exceed len(alloc))
         self.n_saved += n_copied
         # If we're done, stop the timer that's calling this and make sure the
         # camera is idle
-        if self.n_saved >= self.n_kinetics:
-            self.timer.stop()
-            self.patient_assert_idle(dt=1)
+        if self.n_saved >= len(alloc):
+            if loop:
+                self.n_saved %= len(alloc)
+            else: # stop getting data
+                self.timer.stop()
+                self.patient_assert_idle(dt=1)
 
     def kinetic(self, alloc, read_mode="fullbin", dark=False, **kwargs):
         """Take a kinetic series and write the data continuously to alloc"""
@@ -567,16 +572,15 @@ class AndorCamera(object):
             read_mode=read_mode, **kwargs)
 
         # Check that alloc has the correct dimensions and dtype
-        self.check_array(alloc, n_kinetics, read_mode)
+        self.check_array(alloc, read_mode, img_size=n_kinetics)
 
         # Create a timer and hook it up to the alloc updater. Check for new
         # data ten times as frequently as we expect images (ms), but at least
         # 10 Hz
         interval = min(int(kin_time*100), 100)
         self.n_saved = 0
-        self.n_kinetics = n_kinetics
-        self.timer = self.TimerClass(interval, self.kinetic_get_data,
-            args=(read_mode,), kwargs={"alloc": alloc})
+        self.timer = self.TimerClass(interval, self.cont_get_data,
+            args=(alloc, read_mode,))
 
         # Start the exposure, but don't wait to get data
         self.expose()
@@ -599,14 +603,15 @@ class AndorCamera(object):
         self.scan_until_abort_read_mode = read_mode
 
         # Check that alloc has the correct dimensions and dtype & get img size
-        img_size = self.check_array(alloc, 1, read_mode)
+        img_size = self.check_array(alloc, read_mode)
 
         # Create a timer and hook it up to the alloc updater. Check for new
         # data ten times as frequently as we expect images (ms), but at least
         # 10 Hz
         interval = min(int(kin_time*100), 100)
-        self.timer = self.TimerClass(interval, self.get_data,
-            args=(read_mode,), kwargs={"alloc": alloc})
+        self.n_saved = 0
+        self.timer = self.TimerClass(interval, self.cont_get_data,
+            args=(alloc, read_mode), kwargs={"loop": True})
 
         # Start the acquisition and return
         self.expose()
@@ -632,6 +637,9 @@ class AndorCamera(object):
 
             # destroy the timer and slot so no new data copying is attempted
             del self.timer
+
+            # destroy variable used mid-acquisition to avoid confusion
+            del self.n_saved
 
     def cooler_off(self):
         self.make_current()
