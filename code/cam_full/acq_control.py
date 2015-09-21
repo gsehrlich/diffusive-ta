@@ -8,9 +8,8 @@ ui_filename = "acq_control.ui" # filename here
 Ui_Widget, QtBaseClass = uic.loadUiType(ui_filename)
 
 class SimpleController(gui.QWidget, Ui_Widget):
-    new_nmax = core.pyqtSignal(int)
     startAcq = core.pyqtSignal(np.ndarray)
-    startDisplay = core.pyqtSignal()
+    startDisplay = core.pyqtSignal(int)
     abortAcq = core.pyqtSignal()
     abortDisplay = core.pyqtSignal()
 
@@ -24,9 +23,9 @@ class SimpleController(gui.QWidget, Ui_Widget):
 
         self.cam = cam
         self.data_pair = self.cam.get_new_array(n_images=2)
-        self.pump_probe_data = self.data_pair[0]
-        self.probe_only_data = self.data_pair[1]
-        self.next_data_has_pump = True
+        self.probe_only_data = self.data_pair[0]
+        self.pump_probe_data = self.data_pair[1]
+        self.next_data_has_pump = False
 
         # cam already inited and in another thread
         self.startAcq.connect(self.cam.scan_until_abort)
@@ -42,18 +41,15 @@ class SimpleController(gui.QWidget, Ui_Widget):
                 self.new_probe_only.emit(self.probe_only_data)
                 self.next_data_has_pump = True
         else: # n_new == 2
-            self.new_pump_probe.emit(self.pump_probe_data)
             self.new_probe_only.emit(self.probe_only_data)
-
-    def on_spinBox_valueChanged(self):
-        self.new_nmax.emit(self.spinBox.value())
+            self.new_pump_probe.emit(self.pump_probe_data)
 
     @core.pyqtSlot()
     def on_startButton_clicked(self):
         self.startAcq.emit(self.data_pair) # get 2 images at a time
 
         # Tell listeners to start displaying data too
-        self.startDisplay.emit()
+        self.startDisplay.emit(self.spinBox.value())
 
     @core.pyqtSlot()
     def on_abortButton_clicked(self):

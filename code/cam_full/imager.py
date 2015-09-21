@@ -1,46 +1,11 @@
+from __future__ import division
 from PyQt4 import QtCore as core, QtGui as gui
 import atexit
 import numpy as np
 
-"""
-class ImagerWidget(gui.QWidget):
-    acquire = core.pyqtSignal(int)
-    abort = core.pyqtSignal()
-    ImagerClass = Imager
-    plot_name = NotImplemented # Need to provide name of PlotWidget attribute
-
-    def __init__(self, x, *signals):
-        "Accepts the x-dimension of the camera and a signal that sends data."
-        gui.QWidget.__init__(self)
-        Ui_Widget.__init__(self)
-        self.setupUi(self)
-
-        self.imager = ImagerClass(x, *signals)
-
-        self.spinBox.valueChanged.connect(self.imager.change_n)
-        self.acquire.connect(self.imager.acquire)
-        self.abort.connect(self.imager.abort)
-
-        getattr(self, plot_name).setMouseEnabled(x=False, y=True)
-        self.curve = self.rmsPlot.plot()
-        self.imager.plot.connect(self.curve.setData)
-
-        self.n_max = 1
-
-    def new_nmax(self, n_max):
-        self.n_max = n_max
-
-    def startAcq(self, default_n=10):
-        self.spinBox.setMaximum(self.n_max)
-        self.spinBox.setValue(min(default_n, self.n_max))
-        self.acquire.emit(min(default_n, self.n_max))
-
-    def abortAcq(self):
-        self.abort.emit()
-"""
-
 class Imager(core.QObject):
     plot = core.pyqtSignal(object, object)
+    countup = core.pyqtSignal(int)
 
     def __init__(self, x, new_image):
         super(Imager, self).__init__()
@@ -80,8 +45,8 @@ class Imager(core.QObject):
         self.start_countup = 0
 
         # Set up storage and tallies
-        self.storage = np.zeros((n, self.x), dtype=np.int32)
-        self.sum = np.zeros(self.x, dtype=np.int64) # lots of 32-bit ints added
+        self.storage = np.zeros((n, self.x), dtype=float)
+        self.sum = np.zeros(self.x, dtype=float) # lots of 32-bit ints added
 
         # Pre-allocate auxiliary array for calculation
         self.avg = np.zeros(self.x, dtype=float)
@@ -138,4 +103,39 @@ class AvgImager(Imager):
             # Calculate avg
             self.avg[:] = self.sum / self.n
 
-        self.plot.emit(avg)
+        self.plot.emit(xrange(self.x), self.avg)
+        if self.start_countup < self.n: self.countup.emit(self.start_countup)
+
+class ImagerWidget(gui.QWidget):
+    acquire = core.pyqtSignal(int)
+    abort = core.pyqtSignal()
+    ImagerClass = NotImplemented # Need to provide type of Imager to instantiate
+    plot_name = NotImplemented # Need to provide name of PlotWidget attribute
+
+    def __init__(self, x, *signals):
+        "Accepts the x-dimension of the camera and a signal that sends data."
+        gui.QWidget.__init__(self)
+        self.finish_setup()
+
+        self.imager = self.ImagerClass(x, *signals)
+
+        self.spinBox.valueChanged.connect(self.imager.change_n)
+        self.acquire.connect(self.imager.acquire)
+        self.abort.connect(self.imager.abort)
+
+        plotter = getattr(self, self.plot_name)
+        plotter.setMouseEnabled(x=False, y=True)
+        self.curve = plotter.plot()
+        self.imager.plot.connect(self.curve.setData)
+
+    def finish_setup(self):
+        """Need to set up UI before widget is ready to use"""
+        raise NotImplementedError
+
+    def startAcq(self, n_max, default_n=10):
+        self.spinBox.setMaximum(n_max)
+        self.spinBox.setValue(min(default_n, n_max))
+        self.acquire.emit(min(default_n, n_max))
+
+    def abortAcq(self):
+        self.abort.emit()

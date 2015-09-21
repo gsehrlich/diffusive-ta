@@ -220,6 +220,7 @@ class AndorCamera(object):
             "image": (self.y, self.x),
             "fullbin": (self.x,)
             }
+        self.x_width, self.y_width = cam_lib.GetPixelSize(float, float)
 
     def __getattr__(self, name):
         """Throw comprehensible error if camera is not yet initialized.
@@ -307,7 +308,7 @@ class AndorCamera(object):
     def prep_acquisition(self, acq_mode, read_mode, exp_time=0,
                          accum_cycle_time=None, n_accums=None,
                          kin_cycle_time=None, n_kinetics=None,
-                         trigger="internal", fast_external=False,
+                         trigger="external", fast_external=False,
                          slit=None, wavelen=None):
         """Set parameters for image acquisition
 
@@ -375,6 +376,14 @@ class AndorCamera(object):
             self.spec.ShamrockSetWavelength(float(wavelen))
         
         return actual_times
+
+    def get_wavelen_array(self):
+        self.make_current()
+        self.spec.ShamrockSetNumberPixels(self.x)
+        self.spec.ShamrockSetPixelWidth(self.x_width)
+        wavelen_array = np.zeros((self.x,), dtype=np.float32)
+        self.spec.ShamrockGetCalibration(wavelen_array.ctypes, self.x)
+        return wavelen_array
     
     def get_new_array(self, n_images, read_mode="fullbin"):
         """Create an array to store the captured images"""

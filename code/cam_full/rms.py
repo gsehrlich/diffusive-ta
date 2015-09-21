@@ -4,15 +4,11 @@ import cam_control
 import numpy as np
 from contextlib import contextmanager
 from andor.andorcamera import newton # for __main__ behavior
-from imager import Imager
+from imager import Imager, ImagerWidget
 import atexit
 import pyqtgraph as pg
 
-ui_filename = "rms.ui" # filename here
-
-# Parse the Designer .ui file 
-Ui_Widget, QtBaseClass = uic.loadUiType(ui_filename)
-
+"""
 class RmsWidget(gui.QWidget, Ui_Widget):
     acquire = core.pyqtSignal(int)
     abort = core.pyqtSignal()
@@ -36,10 +32,10 @@ class RmsWidget(gui.QWidget, Ui_Widget):
         self.n_max = 1
 
         #HAAAACK
-        self.other_plot = pg.plot()
-        self.other_plot.setMouseEnabled(x=False, y=True)
-        self.other_curve = self.other_plot.plot()
-        self.imager.other_plot.connect(self.other_curve.setData)
+        #self.other_plot = pg.plot()
+        #self.other_plot.setMouseEnabled(x=False, y=True)
+        #self.other_curve = self.other_plot.plot()
+        #self.imager.other_plot.connect(self.other_curve.setData)
 
     def new_nmax(self, n_max):
         self.n_max = n_max
@@ -51,9 +47,11 @@ class RmsWidget(gui.QWidget, Ui_Widget):
 
     def abortAcq(self):
         self.abort.emit()
+"""
 
 class RmsImager(Imager):
-    other_plot = core.pyqtSignal(object, object)
+    #HAAAACK
+    #other_plot = core.pyqtSignal(object, object)
 
     def acquire(self, n):
         # Set up an additional tally
@@ -106,12 +104,41 @@ class RmsImager(Imager):
         self.percent_err[:] = self.rms/self.avg
         self.plot.emit(xrange(self.x), self.percent_err)
 
+        # If counting up, tell listeners current progress
+        if self.start_countup <= self.n: self.countup.emit(self.start_countup)
+
         #HAAAACK
-        self.other_plot.emit(xrange(self.x), self.avg)
+        #self.other_plot.emit(xrange(self.x), self.avg)
 
     def abort(self):
         super(RmsImager, self).abort()
         del self.sum_sq
+
+ui_filename = "rms.ui"
+
+# Parse the Designer .ui file 
+Ui_Widget, QtBaseClass = uic.loadUiType(ui_filename)
+
+class RmsWidget(ImagerWidget, Ui_Widget):
+    ImagerClass = RmsImager
+    plot_name = "rmsPlot"
+
+    def finish_setup(self):
+        Ui_Widget.__init__(self)
+        self.setupUi(self)
+
+        #HAAAACK
+        #self.other_plot = pg.plot()
+        #self.other_plot.setMouseEnabled(x=False, y=True)
+        #self.other_curve = self.other_plot.plot()
+        #self.imager.other_plot.connect(self.other_curve.setData)
+
+    def __init__(self, *args):
+        super(RmsWidget, self).__init__(*args)
+        self.imager.countup.connect(self.update_countup)
+
+    def update_countup(self, n):
+        self.countup_label.setText(str(n))
 
 if __name__ == "__main__":
     app = gui.QApplication([])

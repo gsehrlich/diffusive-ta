@@ -76,10 +76,17 @@
      <item>
       <widget class="QLabel" name="label_3">
        <property name="text">
-        <string>spectra</string>
+        <string>spectra:</string>
        </property>
        <property name="alignment">
         <set>Qt::AlignLeading|Qt::AlignLeft|Qt::AlignVCenter</set>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QLabel" name="countup_label">
+       <property name="text">
+        <string>0</string>
        </property>
       </widget>
      </item>
