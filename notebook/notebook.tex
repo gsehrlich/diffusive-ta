@@ -476,4 +476,8 @@ Another realization: I have to be careful when I'm storing QObjects as attribute
 
 Two more confusing not-quite-errors that I think I've fixed without understanding them. When I'm given a warning that QTimers cannot be stopped or started from another thread, sometimes I'm not even starting or stopping a QTimer. Also, sometimes the program randomly crashes after initialization is done. I fixed both of these problems by making everything thread-safe (duh): when changing something about the GUI, do it via a signal, not by calling the widget's method directly. (I'm still using read-only methods directly because using signals for that sounds hard.)
 
+\labday{2015.09.22}
+
+An error I've run into a couple of times: a window I've created never appears. Most of the time my mistake is creating that window inside a function or some other scope that gets terminated, so that Python garbage collects the window and it never appears. The mistake is sometimes when I'm lazily using \verb globals  to get around this, I change some of the names but not others.
+
 \end{document} 

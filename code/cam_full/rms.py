@@ -4,7 +4,7 @@ import cam_control
 import numpy as np
 from contextlib import contextmanager
 from andor.andorcamera import newton # for __main__ behavior
-from imager import Imager, ImagerWidget
+from plotter import Plotter, PlotterWidget
 import atexit
 import pyqtgraph as pg
 
@@ -19,15 +19,15 @@ class RmsWidget(gui.QWidget, Ui_Widget):
         Ui_Widget.__init__(self)
         self.setupUi(self)
 
-        self.imager = RmsImager(x, new_image)
+        self.plotter = RmsPlotter(x, new_image)
 
-        self.spinBox.valueChanged.connect(self.imager.change_n)
-        self.acquire.connect(self.imager.acquire)
-        self.abort.connect(self.imager.abort)
+        self.spinBox.valueChanged.connect(self.plotter.change_n)
+        self.acquire.connect(self.plotter.acquire)
+        self.abort.connect(self.plotter.abort)
 
         self.rmsPlot.setMouseEnabled(x=False, y=True)
         self.curve = self.rmsPlot.plot()
-        self.imager.plot.connect(self.curve.setData)
+        self.plotter.plot.connect(self.curve.setData)
 
         self.n_max = 1
 
@@ -35,7 +35,7 @@ class RmsWidget(gui.QWidget, Ui_Widget):
         #self.other_plot = pg.plot()
         #self.other_plot.setMouseEnabled(x=False, y=True)
         #self.other_curve = self.other_plot.plot()
-        #self.imager.other_plot.connect(self.other_curve.setData)
+        #self.plotter.other_plot.connect(self.other_curve.setData)
 
     def new_nmax(self, n_max):
         self.n_max = n_max
@@ -49,31 +49,35 @@ class RmsWidget(gui.QWidget, Ui_Widget):
         self.abort.emit()
 """
 
-class RmsImager(Imager):
+class RmsPlotter(Plotter):
     #HAAAACK
     #other_plot = core.pyqtSignal(object, object)
 
     def acquire(self, n):
-        # Set up an additional tally
-        self.sum_sq = np.zeros(self.x, dtype=np.int64)
+        # Set up an additional tally.
+        # Use float for generality, including when self.mode == "log"
+        self.sum_sq = np.zeros(self.x, dtype=float)
 
         # Pre-allocate two additional auxiliary arrays for calculation
         self.rms = np.zeros(self.x, dtype=float)
         self.percent_err = np.zeros(self.x, dtype=float)
 
         # Let the superclass take care of the rest
-        super(RmsImager, self).acquire(n)
+        super(RmsPlotter, self).acquire(n)
 
-    def calc(self, data):
+    def calc(self, x_arr, y_arr):
+        if self.mode == "log":
+            y_arr = np.log(y_arr)
+
         # Progressively increase denominator of avg until n is reached
         if self.start_countup < self.n:
             i = self.next_index()
             self.start_countup += 1
 
-            # Copy new data into empty storage
-            self.storage[i] = data
+            # Copy new y_arr into empty storage
+            self.storage[i] = y_arr
 
-            # Add data into running tallies
+            # Add y_arr into running tallies
             self.sum += self.storage[i]
             self.sum_sq += self.storage[i]**2
 
@@ -85,14 +89,14 @@ class RmsImager(Imager):
         else:
             i = self.next_index()
 
-            # Take the oldest data out of the running tally
+            # Take the oldest y_arr out of the running tally
             self.sum -= self.storage[i]
             self.sum_sq -= self.storage[i]**2
 
-            # Copy new data over the old data
-            self.storage[i] = data
+            # Copy new y_arr over the old y_arr
+            self.storage[i] = y_arr
 
-            # Add data into running tallies
+            # Add y_arr into running tallies
             self.sum += self.storage[i]
             self.sum_sq += self.storage[i]**2
 
@@ -102,7 +106,7 @@ class RmsImager(Imager):
 
         # Tell listeners to plot
         self.percent_err[:] = self.rms/self.avg
-        self.plot.emit(xrange(self.x), self.percent_err)
+        self.plot.emit(x_arr, self.percent_err)
 
         # If counting up, tell listeners current progress
         if self.start_countup <= self.n: self.countup.emit(self.start_countup)
@@ -111,16 +115,17 @@ class RmsImager(Imager):
         #self.other_plot.emit(xrange(self.x), self.avg)
 
     def abort(self):
-        super(RmsImager, self).abort()
-        del self.sum_sq
+        super(RmsPlotter, self).abort()
+        del self.sum_sq, self.rms, self.percent_err
 
+"""
 ui_filename = "rms.ui"
 
 # Parse the Designer .ui file 
 Ui_Widget, QtBaseClass = uic.loadUiType(ui_filename)
 
-class RmsWidget(ImagerWidget, Ui_Widget):
-    ImagerClass = RmsImager
+class RmsWidget(PlotterWidget, Ui_Widget):
+    PlotterClass = RmsPlotter
     plot_name = "rmsPlot"
 
     def finish_setup(self):
@@ -131,14 +136,15 @@ class RmsWidget(ImagerWidget, Ui_Widget):
         #self.other_plot = pg.plot()
         #self.other_plot.setMouseEnabled(x=False, y=True)
         #self.other_curve = self.other_plot.plot()
-        #self.imager.other_plot.connect(self.other_curve.setData)
+        #self.plotter.other_plot.connect(self.other_curve.setData)
 
     def __init__(self, *args):
         super(RmsWidget, self).__init__(*args)
-        self.imager.countup.connect(self.update_countup)
+        self.plotter.countup.connect(self.update_countup)
 
     def update_countup(self, n):
         self.countup_label.setText(str(n))
+"""
 
 if __name__ == "__main__":
     app = gui.QApplication([])
