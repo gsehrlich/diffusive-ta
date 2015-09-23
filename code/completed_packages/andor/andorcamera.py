@@ -548,7 +548,7 @@ class AndorCamera(object):
         tot_time = cycle_time*n_accums
         return self.expose(read_mode, get_data_dt=tot_time, dark=dark)
 
-    def cont_get_data(self, alloc, read_mode, loop=False):
+    def cont_get_data(self, read_mode, alloc, loop=False):
         """Keep track of where in the array to start copying data"""
         # Copy any new data, starting from current image
         n_copied = self.get_data(read_mode, alloc=alloc,
@@ -589,7 +589,7 @@ class AndorCamera(object):
         interval = min(int(kin_time*100), 100)
         self.n_saved = 0
         self.timer = self.TimerClass(interval, self.cont_get_data,
-            args=(alloc, read_mode,))
+            args=(read_mode, alloc))
 
         # Start the exposure, but don't wait to get data
         self.expose()
@@ -620,7 +620,7 @@ class AndorCamera(object):
         interval = min(int(kin_time*100), 100)
         self.n_saved = 0
         self.timer = self.TimerClass(interval, self.cont_get_data,
-            args=(alloc, read_mode), kwargs={"loop": True})
+            args=(read_mode, alloc), kwargs={"loop": True})
 
         # Start the acquisition and return
         self.expose()
@@ -669,7 +669,7 @@ class QAndorCamera(QAndorObject, AndorCamera):
     initialization_done = QtCore.pyqtSignal()
     cooldown_started = QtCore.pyqtSignal(int)
     new_images = QtCore.pyqtSignal(int)
-    acquisition_done = QtCore.pyqtSignal()
+    acquisition_done = QtCore.pyqtSignal(np.ndarray)
     abortion_done = QtCore.pyqtSignal()
     cooldown_stopped = QtCore.pyqtSignal()
     shutdown_done = QtCore.pyqtSignal()
@@ -703,17 +703,29 @@ class QAndorCamera(QAndorObject, AndorCamera):
             return n_copied
 
     def single_scan(self, read_mode="fullbin", dark=False, **kwargs):
-        AndorCamera.single_scan(self, read_mode=read_mode, dark=dark, **kwargs)
-        self.acquisition_done.emit()
+        data = AndorCamera.single_scan(self, read_mode=read_mode, dark=dark,
+            **kwargs)
+        self.acquisition_done.emit(data)
+
+    def get_background(self, read_mode="fullbin", **kwargs):
+        """Convenience function for signals to call single_scan(dark=True)"""
+        self.single_scan(read_mode=read_mode, dark=True, **kwargs)
 
     def accum(self, read_mode="fullbin", dark=False, **kwargs):
-        AndorCamera.accum(self, read_mode=read_mode, dark=dark, **kwargs)
-        self.acquisition_done.emit()
+        data = AndorCamera.accum(self, read_mode=read_mode, dark=dark, **kwargs)
+        self.acquisition_done.emit(data)
 
-    def kinetic_get_data(read_mode, alloc=None):
-        AndorCamera.kinetic_get_data(self, read_mode, alloc=alloc)
-        if self.n_saved >= self.n_kinetics:
-            self.acquisition_done.emit()
+    def cont_get_data(self, read_mode, alloc, loop=False):
+        if alloc is None:
+            data = AndorCamera.cont_get_data(self, read_mode, alloc=alloc,
+                loop=loop)
+            if self.n_saved >= len(alloc): # in which case loop=False
+                self.acquisition_done.emit(data)
+        else:
+            AndorCamera.cont_get_data(self, read_mode, alloc=alloc,
+                loop=loop)
+            if self.n_saved >= len(alloc): # in which case loop=False
+                self.acquisition_done.emit(alloc)
 
     def abort(self):
         AndorCamera.abort(self)

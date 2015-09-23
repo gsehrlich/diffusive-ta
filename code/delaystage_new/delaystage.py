@@ -108,7 +108,7 @@ class DelayStage(QObject):
     def sendMessage(self,msg):
         answer=str(self.getInfo(msg))
         if answer=="":
-            return("The device has not answerd")
+            return("The device has not answered")
         return answer
     def getErrorMsg(self):
         return(self.getInfo("TB?"))

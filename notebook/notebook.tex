@@ -480,4 +480,8 @@ Two more confusing not-quite-errors that I think I've fixed without understandin
 
 An error I've run into a couple of times: a window I've created never appears. Most of the time my mistake is creating that window inside a function or some other scope that gets terminated, so that Python garbage collects the window and it never appears. The mistake is sometimes when I'm lazily using \verb globals  to get around this, I change some of the names but not others.
 
+\labday{2015.09.23}
+
+One Python error that's probably more common than I think: ``Got multiple values for keyword argument _____''. Sometimes this is caused by sloppy function definitions involving \verb **kwargs  or sloppy function calls to the same, but both times I have run into it in this problem it was because I was either forgetting \verb self  in a method definition or including it in a method call!
+
 \end{document} 

@@ -8,6 +8,7 @@ ui_filename = "acq_control.ui" # filename here
 Ui_Widget, QtBaseClass = uic.loadUiType(ui_filename)
 
 class SimpleControllerWidget(gui.QWidget, Ui_Widget):
+    getBackground = core.pyqtSignal()
     startAcq = core.pyqtSignal(np.ndarray)
     startDisplay = core.pyqtSignal()
     abortAcq = core.pyqtSignal()
@@ -34,6 +35,7 @@ class SimpleControllerWidget(gui.QWidget, Ui_Widget):
         self.controller.new_probe_only.connect(self.new_probe_only)
 
 class SimpleController(core.QObject):
+    getBackground = core.pyqtSignal()
     startAcq = core.pyqtSignal(np.ndarray)
     startDisplay = core.pyqtSignal()
     abortAcq = core.pyqtSignal()
@@ -47,6 +49,7 @@ class SimpleController(core.QObject):
 
         # cam already inited and in another thread
         self.cam = cam
+        self.getBackground.connect(self.cam.get_background)
         self.startAcq.connect(self.cam.scan_until_abort)
         self.abortAcq.connect(self.cam.abort)
 
@@ -58,17 +61,30 @@ class SimpleController(core.QObject):
     def send_new_images(self, n_new):
         if n_new == 1:
             if self.next_data_has_pump:
-                self.new_pump_probe.emit(self.wavelen_arr, self.pump_probe_data)
+                self.new_pump_probe.emit(self.wavelen_arr,
+                    self.pump_probe_data - self.background)
                 self.next_data_has_pump = False
             else:
-                self.new_probe_only.emit(self.wavelen_arr, self.probe_only_data)
+                self.new_probe_only.emit(self.wavelen_arr,
+                    self.probe_only_data - self.background)
                 self.next_data_has_pump = True
         else: # n_new == 2
-            self.new_probe_only.emit(self.wavelen_arr, self.probe_only_data)
-            self.new_pump_probe.emit(self.wavelen_arr, self.pump_probe_data)
+            self.new_probe_only.emit(self.wavelen_arr,
+                self.probe_only_data - self.background)
+            self.new_pump_probe.emit(self.wavelen_arr,
+                self.pump_probe_data - self.background)
 
     @core.pyqtSlot()
     def on_startButton_clicked(self):
+        self.cam.acquisition_done.connect(self.continue_with_exposure)
+        self.getBackground.emit()
+
+        #self.continue_with_exposure(self.cam.get_new_array(n_images=1))
+
+    def continue_with_exposure(self, background):
+        self.cam.acquisition_done.disconnect(self.continue_with_exposure)
+        self.background = background[0] # shape: (1, 1024) -> (1024)
+
         self.data_pair = self.cam.get_new_array(n_images=2)
         self.pump_probe_data = self.data_pair[0]
         self.probe_only_data = self.data_pair[1]
@@ -88,6 +104,7 @@ class SimpleController(core.QObject):
         self.abortAcq.emit()
         self.abortDisplay.emit()
 
+        del self.background
         del self.data_pair, self.pump_probe_data, self.probe_only_data
         del self.next_data_has_pump
         del self.wavelen_arr
