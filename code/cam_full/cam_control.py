@@ -4,6 +4,7 @@ from andor._known import cam_info
 import sys
 from contextlib import contextmanager
 import time
+import atexit
 
 default_cam = cams.newton
 ui_filename = "cam_control.ui" # filename here
@@ -28,11 +29,6 @@ class CameraControlWidget(gui.QWidget, Ui_Widget):
             self.cam = cam
 
         self.cam_controller = CameraController(self, self.cam)
-        self.cam_controller_thread = core.QThread()
-        self.cam_controller.moveToThread(self.cam_controller_thread)
-        self.cam_controller_thread.started.connect(
-            self.cam_controller.make_timer)
-        core.QTimer.singleShot(0, self.cam_controller_thread.start)
 
         self.initAllButton.clicked.connect(
             self.cam_controller.on_initAllButton_clicked)
@@ -67,11 +63,7 @@ class CameraControlWidget(gui.QWidget, Ui_Widget):
         # Deal with window closing
         self.get_ready_to_close.connect(self.cam_controller.close)
         self.cam_controller.done_closing.connect(self.finish_closing)
-        self.ready_to_close = True
-
-        # Keep from closing, and pass on the message
-        self.cam_controller.cam_initialize_done.connect(
-            self.not_ready_to_close)
+        self.ready_to_close = False
 
         # Tell listeners when the cam is started or shut down
         self.cam_controller.cam_initialize_done.connect(
@@ -110,11 +102,7 @@ class CameraControlWidget(gui.QWidget, Ui_Widget):
             event.ignore()
             self.get_ready_to_close.emit()
 
-    def not_ready_to_close(self):
-        self.ready_to_close = False
-
     def finish_closing(self):
-        self.cam_controller_thread.exit()
         self.ready_to_close = True
         self.close()
 
@@ -137,10 +125,6 @@ class CameraController(core.QObject):
 
         self.widget = widget
         self.cam = cam
-        self.cam_thread = core.QThread()
-        self.cam.moveToThread(self.cam_thread)
-        self.cam.spec.moveToThread(self.cam_thread)
-        core.QTimer.singleShot(0, self.cam_thread.start)
 
         self.all_buttons = (
             self.widget.initAllButton,
@@ -149,6 +133,13 @@ class CameraController(core.QObject):
             self.widget.restartCamButton,
             self.widget.restartAllButton
             )
+
+        self.thread = core.QThread()
+        self.moveToThread(self.thread)
+        core.QTimer.singleShot(0, self.thread.start)
+        self.thread.started.connect(self.make_timer)
+        self.running = False
+        atexit.register(self.close)
 
         # Connect signals to the camera's slots
         self.spec_initialize.connect(self.cam.spec.initialize,
@@ -174,6 +165,9 @@ class CameraController(core.QObject):
         # errors before the user's clicks do
         self.status_timer.setInterval(10)
         self.status_timer.timeout.connect(self.update_camera_status_temp)
+
+        # Also keep track of whether self.close has been called yet
+        self.running = True
 
     def on_initAllButton_clicked(self):
         self.set_enabled.emit(self.widget.initAllButton, False)
@@ -268,17 +262,19 @@ class CameraController(core.QObject):
         self.spec_shut_down.emit()
 
     def close(self):
-        self.set_enabled.emit(self.widget.cooldownButton, False)
-        self.set_enabled.emit(self.widget.coolerOffButton, False)
-        self.set_enabled.emit(self.widget.restartCamButton, False)
-        self.set_enabled.emit(self.widget.restartAllButton, False)
-        self.set_enabled.emit(self.widget.tempSpin, False)
+        if self.running:
+            self.set_enabled.emit(self.widget.cooldownButton, False)
+            self.set_enabled.emit(self.widget.coolerOffButton, False)
+            self.set_enabled.emit(self.widget.restartCamButton, False)
+            self.set_enabled.emit(self.widget.restartAllButton, False)
+            self.set_enabled.emit(self.widget.tempSpin, False)
 
-        if self.cam.is_initialized(): self.shut_down_cam()
-        if self.cam.spec.is_initialized(): self.shut_down_spec()
-        self.cam_thread.exit()
+            if self.cam.is_initialized(): self.shut_down_cam()
+            if self.cam.spec.is_initialized(): self.shut_down_spec()
 
-        self.done_closing.emit()
+            self.done_closing.emit()
+            self.thread.quit()
+            self.running = False
 
     # currently unused
     """
@@ -300,7 +296,6 @@ class CameraController(core.QObject):
                     self.cam_comm_error()
             else:
                 return ret
-    """
 
     def spec_comm_error(self):
         self.set_text.emit(self.widget.cameraStatusLabel, "Spec comm error")
@@ -317,6 +312,7 @@ class CameraController(core.QObject):
         self.set_enabled.emit(self.widget.coolerOffButton, False)
         self.set_enabled.emit(self.widget.restartCamButton, True)
         self.set_enabled.emit(self.widget.restartAllButton, True)
+    """
 
     @contextmanager
     def all_buttons_disabled(self):
@@ -331,6 +327,10 @@ class CameraController(core.QObject):
 
         for button in buttons_prev_enabled:
             self.set_enabled.emit(button, True)
+
+    def __del__(self):
+        print "__del__ has been called"
+        if self.running: self.close()
 
 #currently unused
 """

@@ -10,7 +10,7 @@ def start_the_rest():
     reload(acq_control)
     reload(rms)
     reload(ratio)
-    start_w = acq_control.SimpleControllerWidget(cam)
+    start_w = acq_control.AcquisitionWidget(cam)
     start_w.show()
 
     rms_w = PlotterWidget(rms.RmsPlotter, "RMS/mean counts",

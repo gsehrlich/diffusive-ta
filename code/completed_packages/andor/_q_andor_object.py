@@ -1,4 +1,5 @@
 from PyQt4 import QtCore
+import atexit
 
 class QAndorObject(QtCore.QObject):
     """Wrapped version of an Andor interface that implements PyQt signals"""
@@ -7,6 +8,16 @@ class QAndorObject(QtCore.QObject):
     def __init__(self, out=None):
         QtCore.QObject.__init__(self)
         self.out = out
+
+        self.thread = QtCore.QThread()
+        self.moveToThread(self.thread)
+        QtCore.QTimer.singleShot(0, self.thread.start)
+        self.thread.started.connect(self.make_running)
+        self.running = False
+        atexit.register(self.atexit)
+
+    def make_running(self):
+        self.running = True
 
     @property
     def out(self):
@@ -27,3 +38,10 @@ class QAndorObject(QtCore.QObject):
         self.message.emit(sep.join(args) + end)
         if self._out is not None:
             self._out(*args, sep=sep, end=end)
+
+    def atexit(self):
+        if self.running:
+            self.__del__()
+
+    def __del__(self):
+        self.thread.quit()

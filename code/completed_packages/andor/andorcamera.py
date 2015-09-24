@@ -177,7 +177,8 @@ class AndorCamera(object):
 
     def initialize(self):
         """Initialize the Andor DLL wrapped by this object"""
-        if self.is_initialized(): raise Exception("%r already inited!" % self.name)
+        if self.is_initialized():
+            raise Exception("%r already inited!" % self.name)
         # Try handle corresponding to index given in cam_info
         ind = cam_info[self.name]["index"]
         handle = cam_lib.GetCameraHandle(ind, int)
@@ -257,9 +258,6 @@ class AndorCamera(object):
         """Return the (min, max) temperature of the camera"""
         self.make_current()
         return cam_lib.GetTemperatureRange(int, int)
-
-    def __del__(self):
-        self.shut_down()
         
     def get_temp(self, out=False):
         """Return the camera's current temp (not goal temp) and cooler status"""
@@ -308,7 +306,7 @@ class AndorCamera(object):
     def prep_acquisition(self, acq_mode, read_mode, exp_time=0,
                          accum_cycle_time=None, n_accums=None,
                          kin_cycle_time=None, n_kinetics=None,
-                         trigger="external", fast_external=False,
+                         trigger="external", keep_clean_mode="wait",
                          slit=None, wavelen=None):
         """Set parameters for image acquisition
 
@@ -353,8 +351,24 @@ class AndorCamera(object):
             cam_lib.SetNumberKinetics(n_kinetics)
         self.out("Setting trigger mode:", end=" ")
         cam_lib.SetTriggerMode(self.trigger_modes[trigger])
-        if fast_external:
+        if keep_clean_mode == "wait":
+            if self.name == "newton":
+                cam_lib.EnableKeepCleans(1)
+            cam_lib.SetFastExtTrigger(0)
+        elif keep_clean_mode== "trigger_abort":
+            if self.name == "newton":
+                cam_lib.EnableKeepCleans(1)
             cam_lib.SetFastExtTrigger(1)
+        elif keep_clean_mode=="disable":
+            if (self.name == "newton" and trigger == "external" and
+                read_mode == "fullbin"):
+                cam_lib.EnableKeepCleans(0)
+            else:
+                raise TypeError("Keep cleans can be disabled only on Newton, "
+                    "in external trigger, full vertical binning mode")
+        else:
+            raise TypeError("keep_clean_mode value %r not recognized" %
+                keep_clean_mode)
 
         # The camera isn't connected to the shutter, so tell it not to try
         # to do anything different
@@ -662,6 +676,10 @@ class AndorCamera(object):
         cam_lib.ShutDown()
         del self.handle
 
+    def __del__(self):
+        if self.is_initialized():
+            self.shut_down()
+
 class QAndorCamera(QAndorObject, AndorCamera):
     "Wrapped version of AndorCamera that implements PyQt signals and timing"
     TimerClass = WrappedQTimer
@@ -738,6 +756,10 @@ class QAndorCamera(QAndorObject, AndorCamera):
     def shut_down(self):
         AndorCamera.shut_down(self)
         self.shutdown_done.emit()
+
+    def __del__(self):
+        AndorCamera.__del__(self)
+        QAndorObject.__del__(self)
 
 # Add known cameras to scope for importing
 locals().update(

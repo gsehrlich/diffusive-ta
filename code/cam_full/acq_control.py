@@ -1,13 +1,15 @@
+from __future__ import print_function
 from PyQt4 import QtCore as core, QtGui as gui, uic
 import numpy as np
 import warnings
+import atexit
 
 ui_filename = "acq_control.ui" # filename here
 
 # Parse the Designer .ui file
 Ui_Widget, QtBaseClass = uic.loadUiType(ui_filename)
 
-class SimpleControllerWidget(gui.QWidget, Ui_Widget):
+class AcquisitionWidget(gui.QWidget, Ui_Widget):
     getBackground = core.pyqtSignal()
     startAcq = core.pyqtSignal(np.ndarray)
     startDisplay = core.pyqtSignal()
@@ -22,7 +24,27 @@ class SimpleControllerWidget(gui.QWidget, Ui_Widget):
         Ui_Widget.__init__(self)
         self.setupUi(self)
 
-        self.controller = SimpleController(cam)
+        # Set up stationary parts of the GUI. setupUi crashes on QComboBoxes,
+        # so add them manually here
+        self.cam = cam
+        """
+        self.nameLabel.setText(self.cam.name)
+        self.addComboBoxToFormLayout(0, "acquisitionModeComboBox",
+            ["Scan until abort"], enabled=False)
+        self.addComboBoxToFormLayout(1, "readModeComboBox",
+            ["Full vertical binning"], enabled=False)
+        self.addComboBoxToFormLayout(7, "triggerSourceComboBox",
+            ["Internal", "External"])
+        self.addComboBoxToFormLayout(8, "keepCleanModeComboBox",
+            ["Wait", "Trigger abort"], enabled=False)
+        # ONLY AVAILABLE ON NEWTON IN FVB EXTERNAL TRIGGER MODE
+        if self.cam.name == "newton":
+            self.keepCleanModeComboBox.addItem("Disable")
+
+        # Get exposure times
+        """
+
+        self.controller = Acquirer(self.cam)
         self.startButton.clicked.connect(
             self.controller.on_startButton_clicked)
         self.abortButton.clicked.connect(
@@ -34,7 +56,15 @@ class SimpleControllerWidget(gui.QWidget, Ui_Widget):
         self.controller.new_pump_probe.connect(self.new_pump_probe)
         self.controller.new_probe_only.connect(self.new_probe_only)
 
-class SimpleController(core.QObject):
+    def addComboBoxToFormLayout(self, row, name, menu_items, enabled=True):
+        if hasattr(self, name):
+            raise ValueError("can't add combo box named %r: name exists" % name)
+        setattr(self, name, gui.QComboBox())
+        self.formLayout.setWidget(row, 1, getattr(self, name))
+        getattr(self, name).setEnabled(enabled) # TODO
+        getattr(self, name).addItems(menu_items)
+
+class Acquirer(core.QObject):
     getBackground = core.pyqtSignal()
     startAcq = core.pyqtSignal(np.ndarray)
     startDisplay = core.pyqtSignal()
@@ -57,6 +87,12 @@ class SimpleController(core.QObject):
         self.thread = core.QThread()
         self.moveToThread(self.thread)
         core.QTimer.singleShot(0, self.thread.start)
+        self.thread.started.connect(self.make_running)
+        self.running = False
+        atexit.register(self.__del__)
+
+    def make_running(self):
+        self.running = True
 
     def send_new_images(self, n_new):
         if n_new == 1:
@@ -108,3 +144,7 @@ class SimpleController(core.QObject):
         del self.data_pair, self.pump_probe_data, self.probe_only_data
         del self.next_data_has_pump
         del self.wavelen_arr
+
+    def __del__(self):
+        if self.running:
+            self.thread.quit()

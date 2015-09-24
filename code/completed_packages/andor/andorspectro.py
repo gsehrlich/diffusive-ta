@@ -174,6 +174,10 @@ class QAndorShamrock(QAndorObject, AndorShamrock):
     def __getattr__(self, name):
         return AndorShamrock.__getattr__(self, name)
 
+    def __del__(self):
+        AndorShamrock.__del__(self)
+        QAndorObject.__del__(self)
+
 # Wrap all known attached spectrographs and add to this scope for importing
 locals().update(
     {spectrometers[serial]: QAndorShamrock(serial) for serial in spectrometers}
