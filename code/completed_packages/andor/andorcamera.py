@@ -330,7 +330,7 @@ class AndorCamera(object):
 
         # Set required parameters
         self.out("Setting acquisition mode:", end=" ")
-        cam_lib.SetAcquisitionMode(acq_mode)
+        cam_lib.SetAcquisitionMode(self.acq_modes[acq_mode])
         self.out("Setting read mode:", end=" ")
         cam_lib.SetReadMode(self.read_modes[read_mode])
 
@@ -351,17 +351,18 @@ class AndorCamera(object):
             cam_lib.SetNumberKinetics(n_kinetics)
         self.out("Setting trigger mode:", end=" ")
         cam_lib.SetTriggerMode(self.trigger_modes[trigger])
+        set_keep_cleans = (self.name == "newton" and read_mode == "fullbin" and
+            trigger == "external")
         if keep_clean_mode == "wait":
-            if self.name == "newton":
+            if set_keep_cleans:
                 cam_lib.EnableKeepCleans(1)
             cam_lib.SetFastExtTrigger(0)
         elif keep_clean_mode== "trigger_abort":
-            if self.name == "newton":
+            if set_keep_cleans:
                 cam_lib.EnableKeepCleans(1)
             cam_lib.SetFastExtTrigger(1)
         elif keep_clean_mode=="disable":
-            if (self.name == "newton" and trigger == "external" and
-                read_mode == "fullbin"):
+            if set_keep_cleans:
                 cam_lib.EnableKeepCleans(0)
             else:
                 raise TypeError("Keep cleans can be disabled only on Newton, "
@@ -381,6 +382,8 @@ class AndorCamera(object):
 
         # Now that parameters are set, check actual timing
         actual_times = cam_lib.GetAcquisitionTimings(*(float,)*3)
+        readout_time = cam_lib.GetReadOutTime(float)
+        keep_clean_time = cam_lib.GetKeepCleanTime(float)
         
         # Set up spectrometer
         if slit is not None:
@@ -389,7 +392,8 @@ class AndorCamera(object):
         if wavelen is not None:
             self.spec.ShamrockSetWavelength(float(wavelen))
         
-        return actual_times
+        # Exposure time, accum cycle time, kinetic cycle time, ____, ____
+        return actual_times + (readout_time,) + (keep_clean_time,)
 
     def get_wavelen_array(self):
         self.make_current()
@@ -539,8 +543,9 @@ class AndorCamera(object):
         All of `kwargs` is passed to self.prep_acquisition."""
         # Set up acquisition in single-scan mode.
         # Get actual exposure time --> send to self.expose to wait for data
-        actual_time, _, _ = self.prep_acquisition(acq_mode=1,
-            read_mode=read_mode, **kwargs)
+        exp_time, _, _, readout_time, _ = self.prep_acquisition(
+            acq_mode="single", read_mode=read_mode, **kwargs)
+        actual_time = exp_time + readout_time
         
         # Return data from single exposure
         return self.expose(read_mode, get_data_dt=actual_time, dark=dark)
@@ -554,7 +559,7 @@ class AndorCamera(object):
         # Set up acquisition in accumulation mode.
         # Get actual accumulation cycle time and number of cycles --> send to
         # self.expose to wait for data
-        _, cycle_time, _ = self.prep_acquisition(acq_mode=2,
+        _, cycle_time, _, _, _ = self.prep_acquisition(acq_mode="accum",
             read_mode=read_mode, **kwargs)[1]
         n_accums = kwargs["n_accums"]
         
@@ -591,7 +596,7 @@ class AndorCamera(object):
         # Set up acquisition in kinetic mode.
         # Get actual kinetic cycle time and number of cycles -->
         # determine how often to check for new data
-        _, _, kin_time = self.prep_acquisition(acq_mode=3,
+        _, _, kin_time, _, _ = self.prep_acquisition(acq_mode="kinetic",
             read_mode=read_mode, **kwargs)
 
         # Check that alloc has the correct dimensions and dtype
@@ -620,8 +625,8 @@ class AndorCamera(object):
         # Set up acquisition in kinetic mode.
         # Get actual kinetic cycle time and number of cycles -->
         # determine how often to check for new data
-        _, _, kin_time = self.prep_acquisition(acq_mode=5,
-            read_mode=read_mode, **kwargs)
+        _, _, kin_time, _, _ = self.prep_acquisition(
+            acq_mode="scan_until_abort", read_mode=read_mode, **kwargs)
         # Memorize read mode so that memory can be emptied later
         self.scan_until_abort_read_mode = read_mode
 
@@ -686,6 +691,8 @@ class QAndorCamera(QAndorObject, AndorCamera):
 
     initialization_done = QtCore.pyqtSignal()
     cooldown_started = QtCore.pyqtSignal(int)
+    acquisition_timings = QtCore.pyqtSignal(float, float, float, float, float,
+        str)
     new_images = QtCore.pyqtSignal(int)
     acquisition_done = QtCore.pyqtSignal(np.ndarray)
     abortion_done = QtCore.pyqtSignal()
@@ -708,6 +715,13 @@ class QAndorCamera(QAndorObject, AndorCamera):
     def cooldown(self, temp=None):
         AndorCamera.cooldown(self, temp=temp)
         self.cooldown_started.emit(temp)
+
+    def prep_acquisition_dict(self, kwargs):
+        "allow signals to access prep_acquisition_dict"
+        times = self.prep_acquisition(**kwargs)
+        # keep track of whether internal or external trigger is desired
+        args = times + (kwargs["trigger"],)
+        self.acquisition_timings.emit(*args)
 
     def get_data(self, read_mode, alloc=None, n_start=0):
         if alloc is None:

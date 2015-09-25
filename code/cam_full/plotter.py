@@ -60,7 +60,9 @@ class Plotter(core.QObject):
         self.x = x
         self.new_image = new_image # camera signal that triggers calculation
         self.running = False
-        self.one_second = datetime.timedelta(seconds=1) # for fps calculation
+        # For fps calculation. Leave out earliest 2.5 ms
+        self.one_second = datetime.timedelta(seconds=1, microseconds=-2500)
+
 
         # Give self own event loop so that incoming signals are queued
         self.thread = core.QThread()

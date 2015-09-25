@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>215</width>
-    <height>329</height>
+    <width>233</width>
+    <height>353</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -61,7 +61,10 @@
         <string> ms</string>
        </property>
        <property name="decimals">
-        <number>1</number>
+        <number>2</number>
+       </property>
+       <property name="maximum">
+        <double>10000.000000000000000</double>
        </property>
       </widget>
      </item>
@@ -83,6 +86,12 @@
        <property name="suffix">
         <string> ms</string>
        </property>
+       <property name="decimals">
+        <number>2</number>
+       </property>
+       <property name="maximum">
+        <double>10000.000000000000000</double>
+       </property>
       </widget>
      </item>
      <item row="5" column="0">
@@ -96,12 +105,18 @@
       </widget>
      </item>
      <item row="5" column="1">
-      <widget class="QDoubleSpinBox" name="doubleSpinBox">
+      <widget class="QDoubleSpinBox" name="kinTimeSpinBox">
        <property name="enabled">
         <bool>false</bool>
        </property>
        <property name="suffix">
         <string> ms</string>
+       </property>
+       <property name="decimals">
+        <number>2</number>
+       </property>
+       <property name="maximum">
+        <double>10000.000000000000000</double>
        </property>
       </widget>
      </item>
@@ -124,7 +139,7 @@
         <number>1</number>
        </property>
        <property name="maximum">
-        <number>1</number>
+        <number>10000</number>
        </property>
       </widget>
      </item>
@@ -139,7 +154,7 @@
       </widget>
      </item>
      <item row="6" column="1">
-      <widget class="QSpinBox" name="spinBox">
+      <widget class="QSpinBox" name="nKineticsSpinBox">
        <property name="enabled">
         <bool>false</bool>
        </property>
@@ -147,7 +162,7 @@
         <number>1</number>
        </property>
        <property name="maximum">
-        <number>1</number>
+        <number>10000</number>
        </property>
       </widget>
      </item>
@@ -160,6 +175,9 @@
      </item>
      <item row="8" column="0">
       <widget class="QLabel" name="label_10">
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
        <property name="text">
         <string>Keep clean mode</string>
        </property>
@@ -200,6 +218,13 @@
     </layout>
    </item>
    <item>
+    <widget class="QCheckBox" name="takeBackgroundCheckBox">
+     <property name="text">
+      <string>Take background</string>
+     </property>
+    </widget>
+   </item>
+   <item>
     <layout class="QHBoxLayout" name="horizontalLayout">
      <item>
       <widget class="QPushButton" name="startButton">
@@ -219,6 +244,13 @@
       </widget>
      </item>
     </layout>
+   </item>
+   <item>
+    <widget class="QPushButton" name="flipPumpOnlyPumpProbeButton">
+     <property name="text">
+      <string>Flip pump-only/pump-probe</string>
+     </property>
+    </widget>
    </item>
   </layout>
  </widget>
