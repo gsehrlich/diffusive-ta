@@ -1,5 +1,4 @@
 from __future__ import division
-from PyQt4 import QtCore as core, QtGui as gui, uic
 from plotter import Plotter
 import numpy as np
 

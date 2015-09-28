@@ -1,12 +1,8 @@
 from __future__ import division
-from PyQt4 import QtCore as core, QtGui as gui, uic
-import cam_control
 import numpy as np
 from contextlib import contextmanager
-from andor.andorcamera import newton # for __main__ behavior
 from plotter import Plotter, PlotterWidget
 import atexit
-import pyqtgraph as pg
 
 class RmsPlotter(Plotter):
     def acquire(self, n):
@@ -44,10 +40,3 @@ class RmsPlotter(Plotter):
     def abort(self):
         super(RmsPlotter, self).abort()
         del self.sum_sq, self.rms, self.percent_err
-
-if __name__ == "__main__":
-    app = gui.QApplication([])
-    newton.initialize()
-    w = RmsWidget(newton)
-    w.show()
-    app.exec_()
