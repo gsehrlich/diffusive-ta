@@ -47,10 +47,12 @@ class AndorShamrock(object):
                 raise
 
     def initialize(self):
-        """Initialize the Shamrock DLL wrapped by this object"""
+        """Initialize the Shamrock DLL wrapped by this object, then register"""
         if not self.is_initialized():
             self.out("Initializing Shamrock library:", end=" ")
             spec_lib.ShamrockInitialize()
+
+        self.register()
 
     def register(self):
         """Find the index of the spectrometer with this serial number"""

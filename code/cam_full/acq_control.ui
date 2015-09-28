@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>227</width>
-    <height>301</height>
+    <width>233</width>
+    <height>353</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -51,20 +51,7 @@
      <item row="2" column="0">
       <widget class="QLabel" name="label_4">
        <property name="text">
-        <string>Exposure time</string>
-       </property>
-      </widget>
-     </item>
-     <item row="2" column="1">
-      <widget class="QDoubleSpinBox" name="exposureTimeSpinBox">
-       <property name="suffix">
-        <string> ms</string>
-       </property>
-       <property name="decimals">
-        <number>2</number>
-       </property>
-       <property name="maximum">
-        <double>10000.000000000000000</double>
+        <string>Exposure time (ms)</string>
        </property>
       </widget>
      </item>
@@ -74,23 +61,7 @@
         <bool>false</bool>
        </property>
        <property name="text">
-        <string>Accumulation cycle time</string>
-       </property>
-      </widget>
-     </item>
-     <item row="3" column="1">
-      <widget class="QDoubleSpinBox" name="accumTimeSpinBox">
-       <property name="enabled">
-        <bool>false</bool>
-       </property>
-       <property name="suffix">
-        <string> ms</string>
-       </property>
-       <property name="decimals">
-        <number>2</number>
-       </property>
-       <property name="maximum">
-        <double>10000.000000000000000</double>
+        <string>Accumulation cycle time (ms)</string>
        </property>
       </widget>
      </item>
@@ -100,23 +71,7 @@
         <bool>false</bool>
        </property>
        <property name="text">
-        <string>Kinetic cycle time</string>
-       </property>
-      </widget>
-     </item>
-     <item row="5" column="1">
-      <widget class="QDoubleSpinBox" name="kinTimeSpinBox">
-       <property name="enabled">
-        <bool>false</bool>
-       </property>
-       <property name="suffix">
-        <string> ms</string>
-       </property>
-       <property name="decimals">
-        <number>2</number>
-       </property>
-       <property name="maximum">
-        <double>10000.000000000000000</double>
+        <string>Kinetic cycle time (ms)</string>
        </property>
       </widget>
      </item>
@@ -215,7 +170,47 @@
        </property>
       </widget>
      </item>
+     <item row="2" column="1">
+      <widget class="QLineEdit" name="exposureTimeLineEdit">
+       <property name="text">
+        <string>0.00</string>
+       </property>
+       <property name="placeholderText">
+        <string/>
+       </property>
+      </widget>
+     </item>
+     <item row="3" column="1">
+      <widget class="QLineEdit" name="accumTimeLineEdit">
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+       <property name="text">
+        <string>0.00</string>
+       </property>
+      </widget>
+     </item>
+     <item row="5" column="1">
+      <widget class="QLineEdit" name="kinTimeLineEdit">
+       <property name="enabled">
+        <bool>false</bool>
+       </property>
+       <property name="text">
+        <string>0.00</string>
+       </property>
+      </widget>
+     </item>
     </layout>
+   </item>
+   <item>
+    <widget class="QCheckBox" name="takeBackgroundCheckBox">
+     <property name="text">
+      <string>Take background</string>
+     </property>
+     <property name="checked">
+      <bool>true</bool>
+     </property>
+    </widget>
    </item>
    <item>
     <layout class="QHBoxLayout" name="horizontalLayout">
@@ -237,6 +232,16 @@
       </widget>
      </item>
     </layout>
+   </item>
+   <item>
+    <widget class="QPushButton" name="flipPumpOnlyPumpProbeButton">
+     <property name="enabled">
+      <bool>false</bool>
+     </property>
+     <property name="text">
+      <string>Flip pump-only/pump-probe</string>
+     </property>
+    </widget>
    </item>
   </layout>
  </widget>

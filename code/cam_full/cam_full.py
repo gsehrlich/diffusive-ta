@@ -3,14 +3,14 @@ from andor.andorcamera import newton, idus
 from PyQt4 import QtGui as gui, QtCore as core
 from plotter import PlotterWidget, AvgPlotter
 
-cam = newton
+cam = idus
 
-def start_the_rest():
+def start_the_rest(acquiring):
     global start_w, rms_w, ratio_w, probe_only_w, pump_probe_w
     reload(acq_control)
     reload(rms)
     reload(ratio)
-    start_w = acq_control.AcquisitionWidget(cam)
+    start_w = acq_control.AcquisitionWidget(cam, acquiring=acquiring)
     start_w.show()
 
     rms_w = PlotterWidget(rms.RmsPlotter, "RMS/mean counts",

@@ -14,7 +14,7 @@ Ui_Widget, QtBaseClass = uic.loadUiType(ui_filename)
 
 class CameraControlWidget(gui.QWidget, Ui_Widget):
     get_ready_to_close = core.pyqtSignal()
-    cam_initialize_done = core.pyqtSignal()
+    cam_initialize_done = core.pyqtSignal(bool) # First arg: acquiring
     cam_shut_down = core.pyqtSignal()
 
     def __init__(self, cam=None):
@@ -108,9 +108,8 @@ class CameraControlWidget(gui.QWidget, Ui_Widget):
 
 class CameraController(core.QObject):
     spec_initialize = core.pyqtSignal()
-    spec_register = core.pyqtSignal()
     cam_initialize = core.pyqtSignal()
-    cam_initialize_done = core.pyqtSignal()
+    cam_initialize_done = core.pyqtSignal(bool) # first arg: acquiring
     cool_down = core.pyqtSignal(int)
     cooler_off = core.pyqtSignal()
     cam_shut_down = core.pyqtSignal()
@@ -144,8 +143,6 @@ class CameraController(core.QObject):
         # Connect signals to the camera's slots
         self.spec_initialize.connect(self.cam.spec.initialize,
             type=core.Qt.BlockingQueuedConnection)
-        self.spec_register.connect(self.cam.spec.register,
-            type=core.Qt.BlockingQueuedConnection)
         self.cam_initialize.connect(self.cam.initialize,
             type=core.Qt.BlockingQueuedConnection)
         self.cool_down.connect(self.cam.cooldown,
@@ -161,9 +158,7 @@ class CameraController(core.QObject):
         """Wait until after __init__ to make timer so it's in new thread"""
         # Create and connect a timer to update the camera status etc.
         self.status_timer = core.QTimer()
-        # Make this timer fast so that it will probably catch disconnection
-        # errors before the user's clicks do
-        self.status_timer.setInterval(10)
+        self.status_timer.setInterval(16)
         self.status_timer.timeout.connect(self.update_camera_status_temp)
 
         # Also keep track of whether self.close has been called yet
@@ -227,14 +222,19 @@ class CameraController(core.QObject):
 
     def update_camera_status_temp(self):
         status = self.cam.get_status()
-        temp, cooler_status = self.cam.get_temp()
         self.set_text.emit(self.widget.cameraStatusLabel, status)
-        self.set_text.emit(self.widget.tempLabel, str(temp))
-        self.set_text.emit(self.widget.coolerLabel, cooler_status)
+
+        if "ACQUIRING" in status and self.cam.name == "idus":
+            self.set_text.emit(self.widget.tempLabel, "unknown")
+            self.set_text.emit(self.widget.coolerLabel,
+                "idus can't check temp right now")
+        else:
+            temp, cooler_status = self.cam.get_temp()
+            self.set_text.emit(self.widget.tempLabel, str(temp))
+            self.set_text.emit(self.widget.coolerLabel, cooler_status)
 
     def init_spec(self):
         self.spec_initialize.emit()
-        self.spec_register.emit()
 
     def init_cam(self):
         # Initalize the camera
@@ -248,8 +248,14 @@ class CameraController(core.QObject):
         # Start checking the camera status
         self.status_timer.start()
 
-        # Tell listeners that initialization is done
-        self.cam_initialize_done.emit()
+        # If there was a sudden shutdown while the cooler was on last time,
+        # let the user turn off the cooler
+        if "OFF" not in self.cam.get_temp()[1]:
+            self.set_enabled.emit(self.widget.coolerOffButton, True)
+
+        # If a bad shutdown somehow left the camera acquiring, let the
+        # user abort the acquisition by telling listeners that.
+        self.cam_initialize_done.emit("ACQUIRING" in self.cam.get_status())
 
     def shut_down_cam(self):
         time.sleep(2)

@@ -9,7 +9,7 @@ Python.
 
 """
 
-from __future__ import print_function
+from __future__ import print_function, division
 import time
 import threading
 import numpy as np
@@ -21,14 +21,22 @@ from ctypes import c_int, byref
 from PyQt4 import QtCore
 from contextlib import contextmanager
 
-class RepeatedTimer(threading._Timer):
+class RepeatedTimer(threading.Thread):
+    def __init__(self, interval, function, args=[], kwargs={}):
+        super(RepeatedTimer, self).__init__()
+        self.interval = interval
+        self.function = function
+        self.args = args
+        self.kwargs = kwargs
+
     def run(self):
         self.running = True
         while self.running:
-            threading.Timer.run(self)
+            self.function(*self.args, **self.kwargs)
+            time.sleep(self.interval/1000)
+
     def stop(self):
         self.running = False
-        threading.Timer.cancel(self)
 
 class WrappedQTimer(QtCore.QTimer):
     def __init__(self, interval, function, args=[], kwargs={}):
@@ -351,18 +359,18 @@ class AndorCamera(object):
             cam_lib.SetNumberKinetics(n_kinetics)
         self.out("Setting trigger mode:", end=" ")
         cam_lib.SetTriggerMode(self.trigger_modes[trigger])
-        set_keep_cleans = (self.name == "newton" and read_mode == "fullbin" and
-            trigger == "external")
+        get_set_keep_cleans = (self.name == "newton" and read_mode == "fullbin"
+            and trigger == "external")
         if keep_clean_mode == "wait":
-            if set_keep_cleans:
+            if get_set_keep_cleans:
                 cam_lib.EnableKeepCleans(1)
             cam_lib.SetFastExtTrigger(0)
         elif keep_clean_mode== "trigger_abort":
-            if set_keep_cleans:
+            if get_set_keep_cleans:
                 cam_lib.EnableKeepCleans(1)
             cam_lib.SetFastExtTrigger(1)
         elif keep_clean_mode=="disable":
-            if set_keep_cleans:
+            if get_set_keep_cleans:
                 cam_lib.EnableKeepCleans(0)
             else:
                 raise TypeError("Keep cleans can be disabled only on Newton, "
@@ -383,7 +391,11 @@ class AndorCamera(object):
         # Now that parameters are set, check actual timing
         actual_times = cam_lib.GetAcquisitionTimings(*(float,)*3)
         readout_time = cam_lib.GetReadOutTime(float)
-        keep_clean_time = cam_lib.GetKeepCleanTime(float)
+
+        if get_set_keep_cleans:
+            keep_clean_time = cam_lib.GetKeepCleanTime(float)
+        else:
+            keep_clean_time = -1.
         
         # Set up spectrometer
         if slit is not None:
@@ -410,7 +422,10 @@ class AndorCamera(object):
     def check_array(self, alloc, read_mode, n_images=None):
         # Check that supplied array works; raise an error if not
         if n_images is None:
-            n_images = len(alloc)
+            if len(alloc.shape) <= 1:
+                n_images = 1
+            else:
+                n_images = len(alloc)
         correct_shape = (long(n_images),) + self.img_dims[read_mode]
         template = "Supplied array has wrong %s %r; should be %r"
         if alloc.shape != correct_shape:
@@ -481,9 +496,10 @@ class AndorCamera(object):
         """
         self.make_current()
 
-        # Check if camera is stabilized; if not, send warning
+        # Check if camera is stabilized (or, for idus, unable to chedk the temp
+        # because it's acquiring); if not, send warning
         temp, status = self.get_temp()
-        if status != "DRV_TEMPERATURE_STABILIZED":
+        if status not in ("DRV_TEMPERATURE_STABILIZED", "DRV_ACQUIRING"):
             self.out("Warning: %r; temp %d" % (status, temp))
 
         # Find out which images to gather, and how many total
@@ -653,7 +669,12 @@ class AndorCamera(object):
         except AssertionError:
             # camera is NOT idle
             # stop copying data from camera
-            self.timer.stop()
+            try:
+                self.timer.stop()
+            except AttributeError:
+                pass
+                # Make sure to get to AbortAcquisition, even if self.timer
+                # doesn't exist due to some error.
 
             # stop camera from getting new data
             self.make_current()
@@ -661,13 +682,22 @@ class AndorCamera(object):
             cam_lib.AbortAcquisition()
 
             # clean out data register
-            self.get_data(self.scan_until_abort_read_mode)
+            try:
+                self.get_data(self.scan_until_abort_read_mode)
+            except AttributeError:
+                pass
+                # Make sure to keep going in shut_down or whatever, even if
+                # something here doesn't exist due to some error.
 
-            # destroy the timer and slot so no new data copying is attempted
-            del self.timer
+            try:
+                # destroy the timer and slot so no new data copying is attempted
+                del self.timer
+            except AttributeError: pass
 
-            # destroy variable used mid-acquisition to avoid confusion
-            del self.n_saved
+            try:
+                # destroy variable used mid-acquisition to avoid confusion
+                del self.n_saved
+            except AttributeError: pass
 
     def cooler_off(self):
         self.make_current()
@@ -676,6 +706,7 @@ class AndorCamera(object):
 
     def shut_down(self):
         """Shut down gracefully"""
+        self.abort()
         self.cooler_off()
         self.out("Shutting down %r..." % self.name, end=" ")
         cam_lib.ShutDown()
