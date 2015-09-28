@@ -3,7 +3,7 @@ from andor.andorcamera import newton, idus
 from PyQt4 import QtGui as gui, QtCore as core
 from plotter import PlotterWidget, AvgPlotter
 
-cam = idus
+cam = newton
 
 def start_the_rest(acquiring):
     global start_w, rms_w, ratio_w, probe_only_w, pump_probe_w
