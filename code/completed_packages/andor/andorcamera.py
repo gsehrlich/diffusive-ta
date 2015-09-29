@@ -499,7 +499,7 @@ class AndorCamera(object):
         # Check if camera is stabilized (or, for idus, unable to chedk the temp
         # because it's acquiring); if not, send warning
         temp, status = self.get_temp()
-        if status not in ("DRV_TEMPERATURE_STABILIZED", "DRV_ACQUIRING"):
+        if status not in ("DRV_TEMP_STABILIZED", "DRV_ACQUIRING"):
             self.out("Warning: %r; temp %d" % (status, temp))
 
         # Find out which images to gather, and how many total

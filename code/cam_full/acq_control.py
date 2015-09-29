@@ -160,6 +160,7 @@ class AcquisitionWidget(gui.QWidget, Ui_Widget):
 
     @core.pyqtSlot()
     def on_startButton_clicked(self):
+        self.send_acquisition_settings()
         self.set_acquisition_gui()
         self.start.emit()
 
@@ -340,6 +341,7 @@ class Acquirer(core.QObject):
         """Slot for cam.new_images. Background-correct and pass on"""
         if n_new == 1:
             if self.next_data_has_pump:
+                #self.pump_probe_data -= self.background
                 self.new_pump_probe.emit(self.wavelen_arr,
                     self.pump_probe_data - self.background)
                 self.next_data_has_pump = False
@@ -361,14 +363,23 @@ class Acquirer(core.QObject):
 
     def on_abort(self):
         """Stop listening to the camera, stop acquiring, and clean up"""
-        self.cam.new_images.disconnect(self.send_new_images)
-        self.abortAcq.emit()
-        self.abortDisplay.emit()
-
-        del self.background
-        del self.data_pair, self.pump_probe_data, self.probe_only_data
-        del self.next_data_has_pump
-        del self.wavelen_arr
+        try:
+            self.cam.new_images.disconnect(self.send_new_images)
+        except TypeError:
+            # The abort button was probably pressed mid-backg collection
+            self.cam.acquisition_done.disconnect(
+                self.store_backg_and_continue)
+        else:
+            # This will throw errors if only the background collection
+            # has started when abort is pressed
+            self.abortDisplay.emit()
+            del self.background
+            del self.data_pair, self.pump_probe_data, self.probe_only_data
+            del self.next_data_has_pump
+            del self.wavelen_arr
+        finally:
+            # Definitely make sure the acquisition is actually aborted
+            self.abortAcq.emit()
 
     def __del__(self):
         if self.running:
