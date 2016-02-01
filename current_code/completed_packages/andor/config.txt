@@ -1,0 +1,1 @@
+andorpath: C:\Program Files\Andor SOLIS\Drivers

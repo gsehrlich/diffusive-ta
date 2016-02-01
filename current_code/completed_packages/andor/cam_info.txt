@@ -1,0 +1,2 @@
+Newton01: port 0, temp -70, index 1
+iDus01: port 1, temp -70, index 0
