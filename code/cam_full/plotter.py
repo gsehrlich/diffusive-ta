@@ -1,3 +1,13 @@
+"""Specifies GUI for dynamically plotting camera data
+
+This module defines three classes:
+- PlotterWidget sets up the GUI in which data is plotted
+- Plotter sets a framework in which a particular calculation over the past
+n images can be done dynamically. Intended as an abstract class
+- AvgPlotter subclasses Plotter as an example. It calculates the boxcar
+average
+"""
+
 from __future__ import division
 from PyQt4 import QtCore as core, QtGui as gui, uic
 import atexit
@@ -8,6 +18,7 @@ import datetime
 Ui_Widget, QtBaseClass = uic.loadUiType("plotterWidget.ui")
 
 class PlotterWidget(gui.QWidget, Ui_Widget):
+    """Set up the GUI for the data plotter"""
     acquire = core.pyqtSignal(int)
     abort = core.pyqtSignal()
     n_max = 1000000 # boxcar average at most one million spectra
@@ -50,6 +61,20 @@ class PlotterWidget(gui.QWidget, Ui_Widget):
         self.abort.emit()
 
 class Plotter(core.QObject):
+    """Tell the GUI what to plot.
+
+    Plotter will:
+    - automatically put itself in its own QThread and start it
+    - restart a calculation when the boxcar width changes
+    - set up an array in memory to store recent images
+    - rotate through the created array to replace the oldest image with
+    the newest while running the calculation
+    - connect to signals/slots from andor.andorcamera.AndorCamera and
+    PlotterWidget
+    - safely stop calculations
+    - safely shut down upon deletion
+
+    """
     plot = core.pyqtSignal(object, object)
     countup = core.pyqtSignal(int)
     fps = core.pyqtSignal(int)
@@ -159,6 +184,7 @@ class Plotter(core.QObject):
         self.thread.quit()
 
 class AvgPlotter(Plotter):
+    """Dynamically calculate the boxcar average."""
     def acquire(self, n):
         # Set up tally
         self.sum = np.zeros(self.x, dtype=np.int64)

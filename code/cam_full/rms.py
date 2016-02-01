@@ -5,6 +5,7 @@ from plotter import Plotter, PlotterWidget
 import atexit
 
 class RmsPlotter(Plotter):
+    """Dynamically calculate the boxcar root mean square."""
     def acquire(self, n):
         # Set up tallies
         self.sum = np.zeros(self.x, dtype=np.int64)

@@ -3,6 +3,7 @@ from plotter import Plotter
 import numpy as np
 
 class RatioPlotter(Plotter):
+    "Dynamically calculate the ratio of the averages of two alternating images"
     def __init__(self, x, new_probe_only, new_pump_probe):
         # Initialize so that new_probe_only activates the plotting routine
         super(RatioPlotter, self).__init__(x, new_probe_only)
