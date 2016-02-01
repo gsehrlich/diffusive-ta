@@ -2,13 +2,23 @@ from PyQt4 import QtCore
 import atexit
 
 class QAndorObject(QtCore.QObject):
-    """Wrapped version of an Andor interface that implements PyQt signals"""
+    """Wrapped version of an Andor interface that implements PyQt signals.
+
+    This object:
+    * lives in its own QThread, which it automatically creates, starts,
+    and quits;
+    * can be initialized with an optional "out" function as a kwarg so that,
+    when `obj.out(msg)` is called, will first emit `obj.message` with `msg`
+    as an argument, and then call the provided function."""
     message = QtCore.pyqtSignal(str)
 
     def __init__(self, out=None):
+        """`out` should be a print-style function: fn(s, sep=" ", end="\\n").
+        Currently no support is provided for a `file` kwarg."""
         QtCore.QObject.__init__(self)
         self.out = out
 
+        # Automate thread creation, starting, and deletion
         self.thread = QtCore.QThread()
         self.moveToThread(self.thread)
         QtCore.QTimer.singleShot(0, self.thread.start)

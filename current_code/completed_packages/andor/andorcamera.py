@@ -3,7 +3,7 @@
 WARNING: not thread-safe with two simultaneous cameras. May not raise errors;
 may just yield garbage data.
 
-Defines a class, `AndorCamera`, and two instances of it, `Newton01` and `iDus01`,
+Defines a class, `AndorCamera`, and all instances of it defined in cameras.txt,
 which bundle functionality from the andordll module for easy use from within
 Python.
 

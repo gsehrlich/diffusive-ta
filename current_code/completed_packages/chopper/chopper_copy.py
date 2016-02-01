@@ -1,4 +1,7 @@
-# from http://pythonforengineers.com/your-first-gui-app-with-python-and-pyqt/
+"""Defines a class for interfacing with the Thorlabs optical chopper MC2000.
+
+from http://pythonforengineers.com/your-first-gui-app-with-python-and-pyqt/
+"""
 
 import sys
 from PyQt4 import QtCore, QtGui, uic
@@ -10,6 +13,7 @@ import os
 UiWidget, QtBaseClass = uic.loadUiType(os.path.join(os.path.dirname(__file__),"chopper.ui"))
 
 class ChopperControls(QtGui.QWidget, UiWidget):
+    "GUI class for Thorlabs optical chopper MC2000"
     def __init__(self, *args, **kwargs):
         defaults = {"name": "Chopper"}
         defaults.update(kwargs)

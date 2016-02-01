@@ -1,3 +1,5 @@
+"Load data from spectrometers.txt, cameras.txt, dlls_XX.txt, cam_info.txt."
+
 from ._andorpath import _self_path
 import os
 import re

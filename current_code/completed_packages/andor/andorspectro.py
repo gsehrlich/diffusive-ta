@@ -1,6 +1,7 @@
 """Contains classes for integrating Andor spectrometer interfacing.
 
 Spectrometers currently implemented: Andor Shamrock.
+
 """
 
 from __future__ import print_function
@@ -12,7 +13,13 @@ import types
 from PyQt4 import QtCore
 
 class AndorShamrock(object):
-    """Integrates functionality for interacting with Andor Shamrock"""
+    """Integrates functionality for interacting with Andor Shamrock
+
+    Objects of this class:
+    * Automatically initialize and shut down their associated hardware
+    * Interpret unknown method calls as calls to the Andor SDK
+    through spec_lib, and then dynamically wrap and remember them
+    """
 
     @property
     def out(self):
